@@ -10,7 +10,11 @@ body {
   height: 100%;
   overflow: hidden;
   background: #a9c9bd;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   /* Chặn cuộn/zoom/chọn chữ/menu nhấn giữ trên điện thoại */
   overscroll-behavior: none;
   touch-action: none;
@@ -47,10 +51,14 @@ canvas {
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
   background:
     radial-gradient(circle, var(--color) 0 1.5px, transparent 2px),
-    linear-gradient(var(--color), var(--color)) left center / calc(50% - var(--gap)) var(--thick) no-repeat,
-    linear-gradient(var(--color), var(--color)) right center / calc(50% - var(--gap)) var(--thick) no-repeat,
-    linear-gradient(var(--color), var(--color)) center top / var(--thick) calc(50% - var(--gap)) no-repeat,
-    linear-gradient(var(--color), var(--color)) center bottom / var(--thick) calc(50% - var(--gap)) no-repeat;
+    linear-gradient(var(--color), var(--color)) left center / calc(50% - var(--gap)) var(--thick)
+      no-repeat,
+    linear-gradient(var(--color), var(--color)) right center / calc(50% - var(--gap)) var(--thick)
+      no-repeat,
+    linear-gradient(var(--color), var(--color)) center top / var(--thick) calc(50% - var(--gap))
+      no-repeat,
+    linear-gradient(var(--color), var(--color)) center bottom / var(--thick) calc(50% - var(--gap))
+      no-repeat;
   transition: transform 0.12s ease;
 }
 
@@ -326,4 +334,27 @@ canvas {
 
 .hud-btn:active {
   transform: scale(0.96);
+}
+
+.hud-pause.loading {
+  cursor: progress;
+}
+
+/* Nút ngồi / nằm (xếp phía trên nút nhảy) */
+.touch-pose {
+  width: 58px;
+  height: 58px;
+  font:
+    600 13px system-ui,
+    sans-serif;
+}
+
+.touch-sit {
+  right: calc(118px + env(safe-area-inset-right));
+  bottom: calc(46px + env(safe-area-inset-bottom));
+}
+
+.touch-lie {
+  right: calc(36px + env(safe-area-inset-right));
+  bottom: calc(132px + env(safe-area-inset-bottom));
 }

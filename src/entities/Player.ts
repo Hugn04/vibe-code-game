@@ -11,7 +11,16 @@ export interface PlayerCommand {
   moveZ: number;
   run: boolean;
   jump: boolean;
+  /** Vừa bấm nhảy (giữ tới khi vật lý xử lý) — để lần bấm rất nhanh không bị lỡ. */
+  jumpPressed?: boolean;
+  /** Bấm 1 lần để ngồi xổm / đứng dậy. */
+  toggleCrouch?: boolean;
+  /** Bấm 1 lần để nằm sấp / đứng dậy. */
+  toggleProne?: boolean;
 }
+
+/** Tư thế: đứng, ngồi xổm (đi khom được), nằm sấp (bò được). */
+export type Posture = 'stand' | 'crouch' | 'prone';
 
 /**
  * Nhân vật người chơi.
@@ -23,6 +32,7 @@ export class Player {
   readonly position = new THREE.Vector3();
   readonly velocity = new THREE.Vector3();
   onGround = true;
+  posture: Posture = 'stand';
 
   private readonly prevPosition = new THREE.Vector3();
   private readonly body: THREE.Mesh;
@@ -60,7 +70,11 @@ export class Player {
   /** Tải model nhân vật; lỗi thì giữ nguyên viên thuốc. */
   async loadCharacter(url: string): Promise<void> {
     const c = CONFIG.character;
-    const character = await CharacterModel.load(url, c.clips, c.height);
+    const character = await CharacterModel.load(url, {
+      clips: c.clips,
+      height: c.height,
+      rotationY: c.rotationY,
+    });
     if (this.disposed) {
       character.dispose();
       return;
@@ -78,19 +92,68 @@ export class Player {
     return Math.hypot(this.velocity.x, this.velocity.z);
   }
 
+  /**
+   * Độ cao điểm camera nhìn vào (m) — thấp xuống khi ngồi/nằm.
+   */
+  get eyeHeight(): number {
+    return CONFIG.player.eyeHeight[this.posture];
+  }
+
+  /**
+   * Đổi tư thế (chỉ khi đang trên mặt đất):
+   * - Bấm phím của tư thế đang có → đứng dậy; phím tư thế kia → chuyển thẳng sang.
+   * - Nhảy khi đang ngồi/nằm → đứng dậy trước, đứng xong mới tự bật nhảy.
+   */
+  private updatePosture(cmd: PlayerCommand): boolean {
+    if (!this.onGround) return false;
+    const before = this.posture;
+    if (cmd.toggleCrouch) this.posture = this.posture === 'crouch' ? 'stand' : 'crouch';
+    else if (cmd.toggleProne) this.posture = this.posture === 'prone' ? 'stand' : 'prone';
+    else if ((cmd.jump || cmd.jumpPressed) && this.posture !== 'stand') {
+      this.posture = 'stand';
+      // Chờ animation đứng dậy xong (nằm sấp lâu hơn ngồi xổm) rồi mới nhảy.
+      this.pendingJump = CONFIG.player.standUpTime[before];
+    }
+    if (this.posture !== 'stand') this.pendingJump = 0; // lại ngồi/nằm xuống → hủy nhảy chờ
+    return this.posture !== before;
+  }
+
+  /** Thời gian còn lại (giây) trước khi bật nhảy đã hẹn; 0 = không có. */
+  private pendingJump = 0;
+
   fixedUpdate(dt: number, cmd: PlayerCommand, obstacles: readonly Box[]): void {
     const c = CONFIG.player;
     const p = this.position;
     const v = this.velocity;
     this.prevPosition.copy(p);
 
-    // Tăng tốc mượt về vận tốc mục tiêu.
-    const speed = cmd.run ? c.runSpeed : c.walkSpeed;
+    const wasStanding = this.posture === 'stand';
+    if (this.updatePosture(cmd) || !wasStanding) {
+      // Đang ngồi/nằm (hoặc vừa đổi tư thế): không nhảy, không chạy nhanh.
+      cmd = { ...cmd, jump: false, jumpPressed: false, run: false };
+    }
+
+    // Tăng tốc mượt về vận tốc mục tiêu (chậm hơn khi đi khom / bò).
+    const speed =
+      this.posture === 'crouch'
+        ? c.crouchSpeed
+        : this.posture === 'prone'
+          ? c.proneSpeed
+          : cmd.run
+            ? c.runSpeed
+            : c.walkSpeed;
     const k = damp(this.onGround ? c.groundAccel : c.airAccel, dt);
     v.x += (cmd.moveX * speed - v.x) * k;
     v.z += (cmd.moveZ * speed - v.z) * k;
 
-    if (cmd.jump && this.onGround) {
+    // Nhảy đã hẹn (sau khi đứng dậy) — trong lúc đang đứng dậy thì chưa cho nhảy.
+    let jump = cmd.jump || !!cmd.jumpPressed;
+    if (this.pendingJump > 0) {
+      this.pendingJump -= dt;
+      jump = this.pendingJump <= 0;
+      if (jump) this.pendingJump = 0;
+    }
+    if (jump && this.onGround) {
       v.y = c.jumpVelocity;
       this.onGround = false;
     }
@@ -123,11 +186,11 @@ export class Player {
     this.object.position.lerpVectors(this.prevPosition, this.position, alpha);
 
     const speed = this.horizontalSpeed;
-    const facing =
-      aimYaw ?? (speed > 0.3 ? Math.atan2(this.velocity.x, this.velocity.z) : null);
+    const facing = aimYaw ?? (speed > 0.2 ? Math.atan2(this.velocity.x, this.velocity.z) : null);
     if (facing !== null) {
-      this.object.rotation.y +=
-        angleDelta(this.object.rotation.y, facing) * damp(CONFIG.player.turnSharpness, dt);
+      // Nằm sấp xoay người chậm hơn (thân dài, phải trườn).
+      const sharp = CONFIG.player.turnSharpness * (this.posture === 'prone' ? 0.35 : 1);
+      this.object.rotation.y += angleDelta(this.object.rotation.y, facing) * damp(sharp, dt);
     }
 
     if (this.character) this.animateCharacter(this.character, speed, dt);
@@ -148,14 +211,30 @@ export class Player {
   /** Chọn animation theo trạng thái vật lý và chỉnh tốc độ phát cho khớp bước chân. */
   private animateCharacter(character: CharacterModel, speed: number, dt: number): void {
     const c = CONFIG.character;
+    const moving = speed > 0.25;
     let state: MoveState;
-    if (!this.onGround) state = 'jump';
+    if (this.posture === 'crouch' && character.has('crouch')) {
+      state = moving && character.has('crouchWalk') ? 'crouchWalk' : 'crouch';
+    } else if (this.posture === 'prone' && character.has('prone')) {
+      state = moving && character.has('crawl') ? 'crawl' : 'prone';
+    } else if (!this.onGround && character.has('jump')) state = 'jump';
+    else if (!this.onGround)
+      state = character.state ?? 'idle'; // không có clip nhảy: giữ nguyên
     else if (speed < 0.5) state = 'idle';
     else if (speed < c.runThreshold) state = 'walk';
     else state = 'run';
-    character.setState(state, c.fade);
+    // Đổi tư thế (ngồi xuống / nằm xuống / đứng dậy) chuyển chậm hơn đổi bước chân.
+    const group = (s: MoveState | null) =>
+      s === 'crouch' || s === 'crouchWalk' ? 1 : s === 'prone' || s === 'crawl' ? 2 : 0;
+    const postureChange = group(state) !== group(character.state);
+    character.setState(state, postureChange ? c.postureFade : c.fade);
 
-    if (state === 'walk' || state === 'run') {
+    if (!this.onGround && !character.has('jump')) {
+      character.setTimeScale(0.35); // lơ lửng trên không → bước chân chậm lại
+    } else if (state === 'crouchWalk' || state === 'crawl') {
+      const clipSpeed = state === 'crouchWalk' ? c.crouchClipSpeed : c.crawlClipSpeed;
+      character.setTimeScale(clamp(speed / clipSpeed, 0.4, 1.8));
+    } else if (state === 'walk' || state === 'run') {
       // Đi lùi so với hướng mặt (khi đang ngắm) → phát animation ngược.
       const yaw = this.object.rotation.y;
       const forward = (this.velocity.x * Math.sin(yaw) + this.velocity.z * Math.cos(yaw)) / speed;

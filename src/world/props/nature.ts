@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** Một vị trí đặt vật thể (cây, đá, bụi) trên mặt đất. */
 export interface PropInstance {
@@ -11,100 +10,144 @@ export interface PropInstance {
   tint: number;
 }
 
-interface Part {
+export interface Part {
   geometry: THREE.BufferGeometry;
-  material: THREE.MeshStandardMaterial;
+  material: THREE.Material;
   /** Màu gốc khi tô màu riêng từng bản sao (material phải để màu trắng). */
   tintBase?: THREE.Color;
+  castShadow?: boolean;
 }
 
+/** Một loại vật thể = nhiều phần (mỗi phần 1 geometry + 1 material), gốc tọa độ ở chân. */
 export interface PropKind {
   parts: Part[];
-}
-
-const flat = (color: number): THREE.MeshStandardMaterial =>
-  new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9 });
-
-const tinted = (color: number): Pick<Part, 'material' | 'tintBase'> => ({
-  material: flat(0xffffff),
-  tintBase: new THREE.Color(color),
-});
-
-/** Cây thông: thân + 3 tầng nón. */
-export function pineTree(): PropKind {
-  const foliage = mergeGeometries([
-    new THREE.ConeGeometry(1.5, 2.0, 7).translate(0, 2.0, 0),
-    new THREE.ConeGeometry(1.2, 1.8, 7).translate(0, 3.0, 0),
-    new THREE.ConeGeometry(0.85, 1.6, 7).translate(0, 3.9, 0),
-  ])!;
-  return {
-    parts: [
-      { geometry: new THREE.CylinderGeometry(0.18, 0.25, 1.4, 6).translate(0, 0.7, 0), material: flat(0x6b4a2f) },
-      { geometry: foliage, ...tinted(0x2f6b3a) },
-    ],
-  };
-}
-
-/** Cây tán tròn: thân + 3 khối đa diện. */
-export function roundTree(): PropKind {
-  const foliage = mergeGeometries([
-    new THREE.IcosahedronGeometry(1.4, 0).translate(0, 2.8, 0),
-    new THREE.IcosahedronGeometry(1.0, 0).translate(0.7, 3.4, 0.2),
-    new THREE.IcosahedronGeometry(0.9, 0).translate(-0.6, 3.3, -0.3),
-  ])!;
-  return {
-    parts: [
-      { geometry: new THREE.CylinderGeometry(0.2, 0.28, 2.0, 6).translate(0, 1.0, 0), material: flat(0x7a5536) },
-      { geometry: foliage, ...tinted(0x5c9a3c) },
-    ],
-  };
-}
-
-export function bush(): PropKind {
-  const geometry = mergeGeometries([
-    new THREE.IcosahedronGeometry(0.7, 0).scale(1, 0.75, 1).translate(0, 0.45, 0),
-    new THREE.IcosahedronGeometry(0.5, 0).scale(1, 0.75, 1).translate(0.55, 0.35, 0.1),
-  ])!;
-  return { parts: [{ geometry, ...tinted(0x4b8a35) }] };
-}
-
-/** Đá: khối 12 mặt bị dẹt. Đỉnh cao ~0.78 × scale. */
-export const ROCK_TOP = 0.78;
-export const ROCK_HALF_WIDTH = 0.65;
-export function rock(): PropKind {
-  const geometry = new THREE.DodecahedronGeometry(0.8, 0).scale(1, 0.6, 1).translate(0, 0.3, 0);
-  return { parts: [{ geometry, ...tinted(0x8a8a86) }] };
+  /** Hộp bao (đơn vị mét, scale = 1) — dùng để tạo collider. */
+  bounds: THREE.Box3;
 }
 
 /**
- * Dựng mỗi phần của vật thể thành 1 InstancedMesh — vài trăm cây chỉ tốn vài draw call.
+ * Uniform dùng chung cho shader lá cây — Game cập nhật mỗi frame:
+ * - uTime: thời gian cho gió.
+ * - uFocusView: vị trí nhân vật trong không gian camera, để lá chắn tầm nhìn tự mờ.
  */
-export function instantiate(kind: PropKind, items: readonly PropInstance[]): THREE.InstancedMesh[] {
+export const windUniforms = {
+  uTime: { value: 0 },
+  uFocusView: { value: new THREE.Vector3(0, 0, -1e6) },
+};
+
+export interface WindOptions {
+  /** Từ độ cao này (m, tọa độ cục bộ) bắt đầu đung đưa… */
+  from: number;
+  /** …và đung đưa mạnh nhất từ độ cao này trở lên. */
+  to: number;
+  /** Biên độ lắc (m). */
+  amplitude: number;
+}
+
+const FADE_FRAGMENT = /* glsl */ `
+  vec3 fragView = -vViewPosition;
+  float camFade = smoothstep(0.6, 2.8, length(fragView));
+  // Khoảng cách từ điểm đang vẽ tới đoạn thẳng camera → nhân vật (không gian camera).
+  float segT = clamp(dot(fragView, uFocusView) / dot(uFocusView, uFocusView), 0.0, 1.0);
+  float toLine = length(fragView - uFocusView * segT);
+  float occludeFade = mix(1.0, smoothstep(0.9, 2.4, toLine), step(segT, 0.97));
+  float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  if (min(camFade, max(occludeFade, 0.12)) < dither) discard;
+`;
+
+/**
+ * Hiệu ứng cho lá/bụi (chèn vào shader có sẵn của material, giữ nguyên shader cũ nếu có):
+ * - Gió (tùy chọn): đỉnh càng cao càng lắc, mỗi cây lệch pha theo vị trí.
+ * - Tan dần (dither) khi sát camera hoặc chắn giữa camera và nhân vật.
+ */
+export function applyFoliageFx(material: THREE.Material, wind?: WindOptions): void {
+  const previous = material.onBeforeCompile.bind(material);
+  const prevKey = material.customProgramCacheKey.bind(material);
+
+  material.onBeforeCompile = (shader, renderer) => {
+    previous(shader, renderer);
+    shader.uniforms.uTime = windUniforms.uTime;
+    shader.uniforms.uFocusView = windUniforms.uFocusView;
+
+    if (wind) {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uTime;')
+        .replace(
+          '#include <begin_vertex>',
+          /* glsl */ `#include <begin_vertex>
+          #ifdef USE_INSTANCING
+            vec2 windSeed = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
+          #else
+            vec2 windSeed = vec2(0.0);
+          #endif
+          float windWeight = smoothstep(${wind.from.toFixed(2)}, ${wind.to.toFixed(2)}, position.y);
+          float windPhase = uTime * 1.7 + windSeed.x * 0.31 + windSeed.y * 0.23;
+          float gust = 0.6 + 0.4 * sin(uTime * 0.45 + windSeed.x * 0.05);
+          transformed.x += sin(windPhase) * ${wind.amplitude.toFixed(3)} * windWeight * gust;
+          transformed.z += cos(windPhase * 0.83) * ${(wind.amplitude * 0.6).toFixed(3)} * windWeight * gust;`,
+        );
+    }
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uFocusView;')
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${FADE_FRAGMENT}`,
+      );
+  };
+  material.customProgramCacheKey = () =>
+    `${prevKey()}|foliage-${wind ? `${wind.from}-${wind.to}-${wind.amplitude}` : 'still'}`;
+  material.userData.foliage = true;
+}
+
+/**
+ * Dựng mỗi phần của vật thể thành InstancedMesh, chia theo ô lưới `cellSize` mét:
+ * ô nằm ngoài khung nhìn (hoặc ngoài vùng đổ bóng) bị bỏ qua khi vẽ → rừng lớn vẫn nhẹ.
+ */
+export function instantiate(
+  kind: PropKind,
+  items: readonly PropInstance[],
+  cellSize = Infinity,
+): THREE.InstancedMesh[] {
+  const cells = new Map<string, PropInstance[]>();
+  for (const it of items) {
+    const key = Number.isFinite(cellSize)
+      ? `${Math.floor(it.x / cellSize)},${Math.floor(it.z / cellSize)}`
+      : 'all';
+    let list = cells.get(key);
+    if (!list) cells.set(key, (list = []));
+    list.push(it);
+  }
+
   const matrix = new THREE.Matrix4();
   const rotation = new THREE.Quaternion();
   const scale = new THREE.Vector3();
   const position = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   const color = new THREE.Color();
+  const meshes: THREE.InstancedMesh[] = [];
 
-  return kind.parts.map((part) => {
-    const mesh = new THREE.InstancedMesh(part.geometry, part.material, items.length);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    items.forEach((it, i) => {
-      rotation.setFromAxisAngle(up, it.rotY);
-      scale.setScalar(it.scale);
-      position.set(it.x, 0, it.z);
-      mesh.setMatrixAt(i, matrix.compose(position, rotation, scale));
-      if (part.tintBase) {
-        const d = it.tint - 0.5;
-        mesh.setColorAt(i, color.copy(part.tintBase).offsetHSL(d * 0.06, 0, d * 0.12));
-      }
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    mesh.computeBoundingBox();
-    return mesh;
-  });
+  for (const cellItems of cells.values()) {
+    for (const part of kind.parts) {
+      const mesh = new THREE.InstancedMesh(part.geometry, part.material, cellItems.length);
+      mesh.castShadow = part.castShadow ?? true;
+      mesh.receiveShadow = true;
+      cellItems.forEach((it, i) => {
+        rotation.setFromAxisAngle(up, it.rotY);
+        scale.setScalar(it.scale);
+        position.set(it.x, 0, it.z);
+        mesh.setMatrixAt(i, matrix.compose(position, rotation, scale));
+        if (part.tintBase) {
+          const d = it.tint - 0.5;
+          mesh.setColorAt(i, color.copy(part.tintBase).offsetHSL(d * 0.04, d * 0.1, d * 0.1));
+        }
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.computeBoundingBox();
+      meshes.push(mesh);
+    }
+  }
+  return meshes;
 }

@@ -11,8 +11,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
-    // Riêng three.js đã ~550 kB (đã tách chunk riêng, cache lâu dài).
-    chunkSizeWarningLimit: 700,
+    // three.js ~575 kB; ez-tree ~4 MB (nhúng texture cây, chỉ nạp động khi dựng rừng).
+    chunkSizeWarningLimit: 4500,
     rollupOptions: {
       output: { manualChunks: { three: ['three'] } },
     },

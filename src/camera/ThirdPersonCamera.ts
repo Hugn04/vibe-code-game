@@ -11,6 +11,7 @@ export class ThirdPersonCamera {
 
   private readonly focus = new THREE.Vector3();
   private readonly desired = new THREE.Vector3();
+  private focusHeight: number = CONFIG.camera.focusHeight;
   private readonly rayDir = new THREE.Vector3();
   private readonly raycaster = new THREE.Raycaster();
 
@@ -49,14 +50,21 @@ export class ThirdPersonCamera {
    * @param blockers vật cản giữa nhân vật và camera (nhà, cây…) — camera sẽ kéo lại gần
    *   thay vì chui vào trong chúng.
    */
-  update(target: THREE.Vector3, dt: number, blockers: readonly THREE.Object3D[] = []): void {
+  update(
+    target: THREE.Vector3,
+    dt: number,
+    blockers: readonly THREE.Object3D[] = [],
+    focusHeight: number = CONFIG.camera.focusHeight,
+  ): void {
     const c = CONFIG.camera;
+    // Hạ/nâng điểm nhìn mượt (khi nhân vật ngồi/nằm/đứng dậy).
+    this.focusHeight += (focusHeight - this.focusHeight) * damp(3, dt);
     // Điểm nhìn: trên đầu nhân vật, lệch sang phải (qua vai).
     const rightX = Math.cos(this.yaw);
     const rightZ = -Math.sin(this.yaw);
     this.focus.set(
       target.x + rightX * c.shoulderOffset,
-      target.y + c.focusHeight,
+      target.y + this.focusHeight,
       target.z + rightZ * c.shoulderOffset,
     );
     const horiz = Math.cos(this.pitch) * this.distance;
@@ -81,7 +89,10 @@ export class ThirdPersonCamera {
     }
 
     // Bị chặn → nhảy ngay tới vị trí an toàn; không chặn → bám theo mượt.
-    if (blocked && this.camera.position.distanceTo(this.focus) > this.desired.distanceTo(this.focus)) {
+    if (
+      blocked &&
+      this.camera.position.distanceTo(this.focus) > this.desired.distanceTo(this.focus)
+    ) {
       this.camera.position.copy(this.desired);
     } else {
       this.camera.position.lerp(this.desired, damp(c.followSharpness, dt));

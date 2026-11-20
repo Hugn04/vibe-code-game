@@ -41,12 +41,15 @@ export class AimTarget {
     targets: readonly THREE.Object3D[],
     dt: number,
     active: boolean,
+    /** Bỏ qua vật ở gần hơn khoảng này (vd. lá cây giữa camera và nhân vật). */
+    minDistance = 0,
   ): void {
     this.hasHit = false;
     this.object.visible = false;
     if (!active) return;
 
     this.raycaster.setFromCamera(SCREEN_CENTER, camera);
+    this.raycaster.near = minDistance;
     const hit = this.raycaster.intersectObjects(targets as THREE.Object3D[], false)[0];
     if (!hit?.face) return;
 

@@ -3,10 +3,12 @@ import { CONFIG } from '@/config';
 import { ThirdPersonCamera } from '@/camera/ThirdPersonCamera';
 import { Player, type PlayerCommand } from '@/entities/Player';
 import { AimTarget } from '@/gameplay/AimTarget';
+import { PostFX } from '@/render/PostFX';
 import { Hud } from '@/ui/Hud';
 import { TouchControls } from '@/ui/TouchControls';
 import { IS_TOUCH_DEVICE } from '@/utils/device';
 import { World } from '@/world/World';
+import { windUniforms } from '@/world/props/nature';
 import { Input } from './Input';
 
 /**
@@ -22,6 +24,8 @@ export class Game {
   private readonly input: Input;
   private readonly hud: Hud;
   private readonly touch: TouchControls | null = null;
+  /** Hậu kỳ (chỉ máy tính); null = render thẳng. */
+  private readonly postFx: PostFX | null = null;
   private readonly portraitQuery = window.matchMedia('(orientation: portrait)');
   private readonly timer = new THREE.Clock(false);
   private readonly command: PlayerCommand = { moveX: 0, moveZ: 0, run: false, jump: false };
@@ -32,7 +36,14 @@ export class Game {
   private hasStarted = false;
 
   constructor(private readonly container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const usePostFx = CONFIG.render.postprocessing && !IS_TOUCH_DEVICE;
+    // Có hậu kỳ thì khử răng cưa bằng SMAA, không cần MSAA của canvas.
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !usePostFx,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = CONFIG.render.exposure;
     const maxRatio = IS_TOUCH_DEVICE
       ? CONFIG.render.mobileMaxPixelRatio
       : CONFIG.render.maxPixelRatio;
@@ -44,6 +55,7 @@ export class Game {
     document.body.classList.toggle('is-touch', IS_TOUCH_DEVICE);
 
     this.cam = new ThirdPersonCamera(1);
+    if (usePostFx) this.postFx = new PostFX(this.renderer, this.world.scene, this.cam.camera);
     this.input = new Input(this.renderer.domElement);
     this.hud = new Hud(container, IS_TOUCH_DEVICE);
     this.hud.onExitClick(this.exitToStart);
@@ -62,6 +74,13 @@ export class Game {
 
     this.world.scene.add(this.player.object, this.aim.object);
     this.player.teleport(CONFIG.world.spawn.x, 0, CONFIG.world.spawn.z);
+    this.hud.setLoading(true);
+    this.world.ready
+      .catch((err) => console.error('[Game] Lỗi tải bản đồ:', err))
+      .finally(() => {
+        this.loading = false;
+        this.hud.setLoading(false);
+      });
     this.player
       .loadCharacter(import.meta.env.BASE_URL + CONFIG.character.url)
       .catch((err) => console.error('[Game] Không tải được model nhân vật:', err));
@@ -95,6 +114,7 @@ export class Game {
     this.hud.dispose();
     this.aim.dispose();
     this.player.dispose();
+    this.postFx?.dispose();
     this.world.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -108,8 +128,10 @@ export class Game {
 
   private sessionActive = false;
 
+  private loading = true;
+
   private readonly resume = (): void => {
-    if (!this.paused) return;
+    if (!this.paused || this.loading) return;
     this.inSession = true;
     if (IS_TOUCH_DEVICE) {
       // Điện thoại: toàn màn hình + khóa ngang (Android). iPhone không hỗ trợ khóa →
@@ -208,17 +230,31 @@ export class Game {
       while (this.accumulator >= fixedStep) {
         this.player.fixedUpdate(fixedStep, this.command, this.world.obstacles);
         this.accumulator -= fixedStep;
+        // Lệnh bấm-1-lần chỉ được xử lý ở đúng 1 bước vật lý.
+        this.command.toggleCrouch = this.command.toggleProne = this.command.jumpPressed = false;
       }
     }
 
     const alpha = this.accumulator / fixedStep;
     const renderDt = this.paused ? 0 : dt;
     const aiming = this.hasStarted;
-    this.player.render(alpha, renderDt, aiming ? this.cam.facingYaw : null);
+    const faceAim = aiming && CONFIG.player.faceAimDirection;
+    this.player.render(alpha, renderDt, faceAim ? this.cam.facingYaw : null);
     // Camera vẫn bám theo khi tạm dừng (để màn "Bấm để chơi" có góc nhìn đúng).
-    this.cam.update(this.player.object.position, dt, this.world.cameraBlockers);
+    this.cam.update(
+      this.player.object.position,
+      dt,
+      this.world.cameraBlockers,
+      this.player.eyeHeight,
+    );
     this.cam.camera.updateMatrixWorld();
-    this.aim.update(this.cam.camera, this.world.aimTargets, renderDt, aiming && !this.paused);
+    this.aim.update(
+      this.cam.camera,
+      this.world.aimTargets,
+      renderDt,
+      aiming && !this.paused,
+      this.cam.camera.position.distanceTo(this.player.object.position),
+    );
     this.hud.setTargeting(this.aim.hasHit);
     this.world.followShadow(this.player.object.position);
 
@@ -235,7 +271,14 @@ export class Game {
       performance.now(),
     );
 
-    this.renderer.render(this.world.scene, this.cam.camera);
+    windUniforms.uTime.value += renderDt;
+    // Vị trí ngực nhân vật trong không gian camera → shader làm mờ lá chắn tầm nhìn.
+    windUniforms.uFocusView.value
+      .copy(this.player.object.position)
+      .setY(this.player.object.position.y + 1.1)
+      .applyMatrix4(this.cam.camera.matrixWorldInverse);
+    if (this.postFx) this.postFx.render(dt);
+    else this.renderer.render(this.world.scene, this.cam.camera);
     this.input.endFrame();
   };
 
@@ -248,12 +291,17 @@ export class Game {
     this.command.moveZ = dir.z * amount;
     this.command.run = this.input.isDown('run');
     this.command.jump = this.input.isDown('jump');
+    // Giữ lại tới khi có bước vật lý xử lý (frame có thể không chạy bước nào).
+    this.command.toggleCrouch ||= this.input.wasPressed('crouch');
+    this.command.toggleProne ||= this.input.wasPressed('prone');
+    this.command.jumpPressed ||= this.input.wasPressed('jump');
   }
 
   private readonly onResize = (): void => {
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h);
+    this.postFx?.setSize(w, h, this.renderer.getPixelRatio());
     this.cam.resize(w / h);
   };
 

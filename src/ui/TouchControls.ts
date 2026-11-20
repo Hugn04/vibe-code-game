@@ -33,7 +33,9 @@ export class TouchControls {
       <button class="touch-btn touch-jump" aria-label="Nhảy">
         <svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 4l-7 8h4.5v7h5v-7H19z" fill="currentColor"/></svg>
       </button>
-      <button class="touch-btn touch-pause" aria-label="Tạm dừng"><span></span><span></span></button>`;
+      <button class="touch-btn touch-pause" aria-label="Tạm dừng"><span></span><span></span></button>
+      <button class="touch-btn touch-pose touch-sit" aria-label="Ngồi">Ngồi</button>
+      <button class="touch-btn touch-pose touch-lie" aria-label="Nằm">Nằm</button>`;
     container.appendChild(this.root);
 
     this.joyBase = this.root.querySelector('.joy-base')!;
@@ -59,6 +61,25 @@ export class TouchControls {
     jump.addEventListener('pointerup', setJump(false), opts);
     jump.addEventListener('pointercancel', setJump(false), opts);
     jump.addEventListener('pointerleave', setJump(false), opts);
+
+    // Nút ngồi/nằm: bấm 1 lần để đổi tư thế, bấm lại (hoặc kéo joystick) để đứng dậy.
+    for (const [cls, action] of [
+      ['.touch-sit', 'crouch'],
+      ['.touch-lie', 'prone'],
+    ] as const) {
+      const btn = this.root.querySelector<HTMLButtonElement>(cls)!;
+      const set = (down: boolean) => (e: PointerEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.input.markTouch();
+        btn.classList.toggle('pressed', down);
+        this.input.setVirtualAction(action, down);
+      };
+      btn.addEventListener('pointerdown', set(true), opts);
+      btn.addEventListener('pointerup', set(false), opts);
+      btn.addEventListener('pointercancel', set(false), opts);
+      btn.addEventListener('pointerleave', set(false), opts);
+    }
 
     pause.addEventListener(
       'pointerdown',

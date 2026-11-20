@@ -1,30 +1,34 @@
 import * as THREE from 'three';
 import { CONFIG } from '@/config';
 import type { Box } from '@/physics/collision';
+import { IS_TOUCH_DEVICE } from '@/utils/device';
 import { distanceToSegment } from '@/utils/math';
 import {
-  createCrate,
   createHouse,
   createWell,
   houseHeight,
   WELL_RADIUS,
   type HouseOptions,
 } from './props/buildings';
-import {
-  bush,
-  instantiate,
-  pineTree,
-  ROCK_HALF_WIDTH,
-  ROCK_TOP,
-  rock,
-  roundTree,
-  type PropInstance,
-} from './props/nature';
+import { createTreeKinds, loadGlbKind } from './props/library';
+import { instantiate, type PropInstance, type PropKind } from './props/nature';
+import { pbrMaterial, setWorldUVs } from './textures';
 
 export interface MapBuild {
   root: THREE.Group;
   colliders: Box[];
   aimTargets: THREE.Object3D[];
+}
+
+/** Model môi trường đã tải (xem `npm run assets` và src/world/props/library.ts). */
+export interface MapAssets {
+  trees: PropKind[];
+  rocks: PropKind[];
+  logs: PropKind[];
+  shrubs: PropKind[];
+  crate: PropKind;
+  barrel: PropKind;
+  firePit: PropKind;
 }
 
 interface Rect {
@@ -41,16 +45,49 @@ interface Segment {
   bz: number;
 }
 
-const WALL_COLORS = [0xe6d5b3, 0xc9a27a, 0xd8c3a0, 0xb88a5e];
-const ROOF_COLORS = [0x8e3b2f, 0x5b4636, 0x3f5e7a, 0x6e2f2a];
+interface Placed extends PropInstance {
+  kind: number;
+}
+
 /** Collider cao hơn mức nhảy → không trèo lên được. */
 const SOLID_TOP = 20;
+const WALL_TINTS = [0xffffff, 0xf1e4cc, 0xdccab0, 0xe8e0d4];
+const env = (id: string) => `${import.meta.env.BASE_URL}models/env/${id}.glb`;
+
+/** Tải toàn bộ model của bản đồ song song. */
+export async function loadMapAssets(): Promise<MapAssets> {
+  const [trees, rocks, logs, shrubs, crate, barrel, firePit] = await Promise.all([
+    createTreeKinds([
+      { preset: 'Pine Medium', height: 15, seed: 11 },
+      { preset: 'Pine Small', height: 10, seed: 23 },
+      { preset: 'Oak Medium', height: 12, seed: 37 },
+      { preset: 'Ash Small', height: 11, seed: 41 },
+      { preset: 'Aspen Small', height: 13, seed: 53 },
+    ]),
+    Promise.all(
+      ['rock_07', 'rock_09', 'stone_01', 'rock_moss_set_01'].map((id) => loadGlbKind(env(id))),
+    ),
+    Promise.all(['tree_stump_01', 'dead_tree_trunk'].map((id) => loadGlbKind(env(id)))),
+    Promise.all([
+      loadGlbKind(env('shrub_03'), { foliage: { from: 0.1, to: 1.2, amplitude: 0.05 } }),
+      loadGlbKind(env('shrub_04'), { foliage: { from: 0.1, to: 1.2, amplitude: 0.05 } }),
+      loadGlbKind(env('fern_02'), {
+        foliage: { from: 0.05, to: 0.8, amplitude: 0.04 },
+        castShadow: false,
+      }),
+    ]),
+    loadGlbKind(env('wooden_crate_01')),
+    loadGlbKind(env('wine_barrel_01')),
+    loadGlbKind(env('stone_fire_pit')),
+  ]);
+  return { trees, rocks, logs, shrubs, crate, barrel, firePit };
+}
 
 /**
- * Bản đồ làng trong rừng: bãi đất trống + giếng ở giữa, các nhà xếp vòng quanh
- * có đường đất dẫn vào, rừng cây/đá/bụi rải ngẫu nhiên (theo seed) xung quanh.
+ * Bản đồ làng trong rừng: bãi đất trống + giếng + bếp lửa ở giữa, các nhà xếp vòng quanh
+ * có đường đất dẫn vào, rừng cây/đá/gốc cây/bụi rải ngẫu nhiên (theo seed) xung quanh.
  */
-export function buildForestMap(rand: () => number): MapBuild {
+export function buildForestMap(rand: () => number, assets: MapAssets): MapBuild {
   const F = CONFIG.forest;
   const root = new THREE.Group();
   const colliders: Box[] = [];
@@ -64,18 +101,38 @@ export function buildForestMap(rand: () => number): MapBuild {
     return r;
   };
 
-  // ---- Bãi đất giữa làng + giếng ----
-  const plaza = new THREE.Mesh(
-    new THREE.CircleGeometry(F.plazaRadius, 40).rotateX(-Math.PI / 2),
-    groundDecalMaterial(0x9c7b52),
-  );
+  /** Collider hộp thẳng trục bao trọn model đã xoay/co giãn (shrink < 1 cho vật hình tròn). */
+  const addKindCollider = (kind: PropKind, it: PropInstance, shrink = 1, top?: number) => {
+    const b = kind.bounds;
+    const cx = ((b.min.x + b.max.x) / 2) * it.scale;
+    const cz = ((b.min.z + b.max.z) / 2) * it.scale;
+    const hx = ((b.max.x - b.min.x) / 2) * it.scale * shrink;
+    const hz = ((b.max.z - b.min.z) / 2) * it.scale * shrink;
+    const c = Math.cos(it.rotY);
+    const s = Math.sin(it.rotY);
+    const wx = it.x + cx * c + cz * s;
+    const wz = it.z - cx * s + cz * c;
+    const ex = Math.abs(c) * hx + Math.abs(s) * hz;
+    const ez = Math.abs(s) * hx + Math.abs(c) * hz;
+    return addCollider(wx, wz, ex, ez, top ?? b.max.y * it.scale);
+  };
+
+  // ---- Bãi đất giữa làng: giếng + bếp lửa ----
+  const plazaGeo = new THREE.CircleGeometry(F.plazaRadius, 48).rotateX(-Math.PI / 2);
+  setWorldUVs(plazaGeo, 4);
+  const plaza = new THREE.Mesh(plazaGeo, groundDecalMaterial());
   plaza.receiveShadow = true;
   root.add(plaza);
 
   root.add(createWell());
   addCollider(0, 0, WELL_RADIUS, WELL_RADIUS, SOLID_TOP);
 
+  const fire: Placed = { x: 5.5, z: -3.5, scale: 1, rotY: 0.4, tint: 0.5, kind: 0 };
+  root.add(...instantiate(assets.firePit, [fire]));
+  addKindCollider(assets.firePit, fire, 0.85);
+
   // ---- Nhà xếp vòng quanh, cửa hướng vào giữa ----
+  const props: { crate: Placed[]; barrel: Placed[] } = { crate: [], barrel: [] };
   for (let i = 0; i < F.houseCount; i++) {
     const angle = (i / F.houseCount) * Math.PI * 2 + (rand() - 0.5) * 0.35;
     const dist = F.houseRing + rand() * 5;
@@ -83,12 +140,13 @@ export function buildForestMap(rand: () => number): MapBuild {
     const z = Math.cos(angle) * dist;
 
     const opts: HouseOptions = {
-      width: 5 + rand() * 2,
-      depth: 4.5 + rand() * 1.5,
-      wallHeight: 2.6 + rand() * 0.5,
-      roofHeight: 1.8 + rand() * 0.6,
-      wallColor: pick(WALL_COLORS),
-      roofColor: pick(ROOF_COLORS),
+      width: 5.5 + rand() * 2,
+      depth: 4.8 + rand() * 1.5,
+      wallHeight: 2.7 + rand() * 0.5,
+      roofHeight: 2.0 + rand() * 0.6,
+      wall: rand() < 0.55 ? 'planks' : 'plaster',
+      roof: rand() < 0.5 ? 'tiles' : 'slates',
+      wallTint: pick(WALL_TINTS),
     };
     // Xoay cho cửa (+Z cục bộ) nhìn về tâm, làm tròn tới 90° để collider vẫn là hộp thẳng trục.
     const yaw = Math.round((angle + Math.PI) / (Math.PI / 2)) * (Math.PI / 2);
@@ -98,37 +156,42 @@ export function buildForestMap(rand: () => number): MapBuild {
     root.add(house);
 
     const sideways = Math.abs(Math.sin(yaw)) > 0.5;
-    const hx = (sideways ? opts.depth : opts.width) / 2 + 0.2;
-    const hz = (sideways ? opts.width : opts.depth) / 2 + 0.2;
+    const hx = (sideways ? opts.depth : opts.width) / 2 + 0.25;
+    const hz = (sideways ? opts.width : opts.depth) / 2 + 0.25;
     houseRects.push(addCollider(x, z, hx, hz, houseHeight(opts)));
 
     // Đường đất từ bậc cửa tới mép bãi trống.
     const fx = Math.sin(yaw);
     const fz = Math.cos(yaw);
-    const doorX = x + fx * (opts.depth / 2 + 0.9);
-    const doorZ = z + fz * (opts.depth / 2 + 0.9);
+    const doorX = x + fx * (opts.depth / 2 + 1.0);
+    const doorZ = z + fz * (opts.depth / 2 + 1.0);
     const toCenter = Math.hypot(doorX, doorZ);
     const endX = (doorX / toCenter) * (F.plazaRadius - 0.5);
     const endZ = (doorZ / toCenter) * (F.plazaRadius - 0.5);
     paths.push({ ax: doorX, az: doorZ, bx: endX, bz: endZ });
     root.add(createPath(doorX, doorZ, endX, endZ, F.pathWidth));
 
-    // Vài thùng gỗ cạnh nhà (nhảy lên được).
+    // Thùng gỗ + thùng rượu cạnh nhà (nhảy lên được).
     const rx = Math.cos(yaw);
     const rz = -Math.sin(yaw);
     const side = rand() < 0.5 ? -1 : 1;
-    const crateCount = 1 + Math.floor(rand() * 2);
-    for (let c = 0; c < crateCount; c++) {
-      const size = 0.75 + rand() * 0.35;
-      const cx = x + rx * side * (opts.width / 2 + 1.0) + fx * (opts.depth / 2 - 0.6 - c * 1.2);
-      const cz = z + rz * side * (opts.width / 2 + 1.0) + fz * (opts.depth / 2 - 0.6 - c * 1.2);
-      const crate = createCrate(size);
-      crate.position.set(cx, 0, cz);
-      crate.rotation.y = yaw;
-      root.add(crate);
-      addCollider(cx, cz, size / 2, size / 2, size);
+    const count = 1 + Math.floor(rand() * 3);
+    for (let c = 0; c < count; c++) {
+      const along = opts.depth / 2 - 0.7 - c * 1.3;
+      const item: Placed = {
+        x: x + rx * side * (opts.width / 2 + 1.0) + fx * along,
+        z: z + rz * side * (opts.width / 2 + 1.0) + fz * along,
+        scale: 0.9 + rand() * 0.25,
+        rotY: yaw + (rand() - 0.5) * 0.6,
+        tint: rand(),
+        kind: 0,
+      };
+      (rand() < 0.6 ? props.crate : props.barrel).push(item);
     }
   }
+  root.add(...instantiate(assets.crate, props.crate), ...instantiate(assets.barrel, props.barrel));
+  for (const it of props.crate) addKindCollider(assets.crate, it);
+  for (const it of props.barrel) addKindCollider(assets.barrel, it, 0.85);
 
   // ---- Rừng ----
   const isFree = (x: number, z: number, clearance: number): boolean => {
@@ -137,10 +200,10 @@ export function buildForestMap(rand: () => number): MapBuild {
     if (Math.hypot(x, z) < F.plazaRadius + clearance) return false;
     for (const r of houseRects) {
       if (
-        x > r.minX - clearance - 1 &&
-        x < r.maxX + clearance + 1 &&
-        z > r.minZ - clearance - 1 &&
-        z < r.maxZ + clearance + 1
+        x > r.minX - clearance - 1.5 &&
+        x < r.maxX + clearance + 1.5 &&
+        z > r.minZ - clearance - 1.5 &&
+        z < r.maxZ + clearance + 1.5
       )
         return false;
     }
@@ -152,41 +215,84 @@ export function buildForestMap(rand: () => number): MapBuild {
     return true;
   };
 
-  const scatter = (count: number, clearance: number, spacing: number, taken: PropInstance[]) => {
-    const out: PropInstance[] = [];
+  const scatter = (
+    count: number,
+    kinds: number,
+    opts: { clearance: number; spacing: number; scale: [number, number] },
+    taken: PropInstance[],
+  ): Placed[] => {
+    const out: Placed[] = [];
     const size = CONFIG.world.size;
-    for (let attempt = 0; out.length < count && attempt < count * 8; attempt++) {
+    for (let attempt = 0; out.length < count && attempt < count * 10; attempt++) {
       const x = (rand() * 2 - 1) * size;
       const z = (rand() * 2 - 1) * size;
-      if (!isFree(x, z, clearance)) continue;
-      if (spacing > 0 && taken.some((t) => Math.hypot(t.x - x, t.z - z) < spacing)) continue;
-      const item = { x, z, scale: 0.8 + rand() * 0.6, rotY: rand() * Math.PI * 2, tint: rand() };
+      if (!isFree(x, z, opts.clearance)) continue;
+      if (opts.spacing > 0 && taken.some((t) => Math.hypot(t.x - x, t.z - z) < opts.spacing)) {
+        continue;
+      }
+      const [s0, s1] = opts.scale;
+      const item: Placed = {
+        x,
+        z,
+        scale: s0 + rand() * (s1 - s0),
+        rotY: rand() * Math.PI * 2,
+        tint: rand(),
+        kind: Math.floor(rand() * kinds),
+      };
       out.push(item);
       taken.push(item);
     }
     return out;
   };
 
-  const trees: PropInstance[] = [];
-  const treeItems = scatter(F.treeCount, 2.5, F.treeSpacing, trees);
-  const pines = treeItems.filter(() => rand() < F.pineRatio);
-  const rounds = treeItems.filter((t) => !pines.includes(t));
-  for (const t of treeItems) addCollider(t.x, t.z, 0.3 * t.scale, 0.3 * t.scale, SOLID_TOP);
+  const solid: PropInstance[] = [];
+  const treeCount = IS_TOUCH_DEVICE ? F.mobileTreeCount : F.treeCount;
+  const trees = scatter(
+    treeCount,
+    assets.trees.length,
+    { clearance: 3, spacing: F.treeSpacing, scale: [0.8, 1.2] },
+    solid,
+  );
+  for (const t of trees) addCollider(t.x, t.z, 0.35 * t.scale, 0.35 * t.scale, SOLID_TOP);
 
-  const rocks = scatter(F.rockCount, 1.5, 2, trees);
-  for (const r of rocks) {
-    const h = ROCK_HALF_WIDTH * r.scale;
-    addCollider(r.x, r.z, h, h, ROCK_TOP * r.scale);
-  }
-  const bushes = scatter(F.bushCount, 0.8, 0, []);
+  const rocks = scatter(
+    F.rockCount,
+    assets.rocks.length,
+    { clearance: 1.5, spacing: 2.5, scale: [0.6, 1.3] },
+    solid,
+  );
+  for (const r of rocks) addKindCollider(assets.rocks[r.kind], r, 0.75);
 
-  const instanced = [
-    ...instantiate(pineTree(), pines),
-    ...instantiate(roundTree(), rounds),
-    ...instantiate(rock(), rocks),
-    ...instantiate(bush(), bushes),
-  ];
-  root.add(...instanced);
+  const logs = scatter(
+    F.logCount,
+    assets.logs.length,
+    { clearance: 1.5, spacing: 2.5, scale: [0.8, 1.2] },
+    solid,
+  );
+  for (const l of logs) addKindCollider(assets.logs[l.kind], l, 0.8);
+
+  const shrubCount = IS_TOUCH_DEVICE ? Math.round(F.bushCount * 0.5) : F.bushCount;
+  const shrubs = scatter(
+    shrubCount,
+    assets.shrubs.length,
+    { clearance: 0.5, spacing: 0, scale: [0.7, 1.3] },
+    [],
+  );
+
+  const place = (kinds: PropKind[], items: Placed[]) =>
+    kinds.flatMap((kind, k) =>
+      instantiate(
+        kind,
+        items.filter((it) => it.kind === k),
+        F.chunkSize,
+      ),
+    );
+  root.add(
+    ...place(assets.trees, trees),
+    ...place(assets.rocks, rocks),
+    ...place(assets.logs, logs),
+    ...place(assets.shrubs, shrubs),
+  );
 
   // Tâm ngắm trúng được mọi mesh trong bản đồ.
   const aimTargets: THREE.Object3D[] = [];
@@ -197,11 +303,10 @@ export function buildForestMap(rand: () => number): MapBuild {
   return { root, colliders, aimTargets };
 }
 
-/** Vật liệu phẳng dán trên mặt đất, đẩy lên trước để không nhấp nháy (z-fighting). */
-function groundDecalMaterial(color: number, layer = 2): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color,
-    roughness: 1,
+/** Vật liệu dán trên mặt đất, đẩy lên trước để không nhấp nháy (z-fighting). */
+function groundDecalMaterial(layer = 2): THREE.MeshStandardMaterial {
+  return pbrMaterial('dirt', {
+    color: 0xa08d74,
     polygonOffset: true,
     polygonOffsetFactor: -layer,
     polygonOffsetUnits: -layer,
@@ -212,10 +317,9 @@ function createPath(ax: number, az: number, bx: number, bz: number, width: numbe
   const dx = bx - ax;
   const dz = bz - az;
   const length = Math.hypot(dx, dz);
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, length).rotateX(-Math.PI / 2),
-    groundDecalMaterial(0x8f6f48, 1), // dưới lớp bãi đất ở chỗ chồng nhau
-  );
+  const geo = new THREE.PlaneGeometry(width, length).rotateX(-Math.PI / 2);
+  setWorldUVs(geo, 4);
+  const mesh = new THREE.Mesh(geo, groundDecalMaterial(1)); // dưới lớp bãi đất ở chỗ chồng nhau
   mesh.position.set((ax + bx) / 2, 0, (az + bz) / 2);
   mesh.rotation.y = Math.atan2(dx, dz);
   mesh.receiveShadow = true;

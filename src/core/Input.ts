@@ -6,6 +6,8 @@ export const BINDINGS = {
   right: ['KeyD', 'ArrowRight'],
   run: ['ShiftLeft', 'ShiftRight'],
   jump: ['Space'],
+  crouch: ['KeyC', 'ControlLeft'],
+  prone: ['KeyZ'],
   pause: ['Escape', 'KeyP'],
 } as const;
 

@@ -17,24 +17,43 @@ export const CONFIG = {
     houseCount: 7,
     /** Khoảng cách từ tâm làng tới các nhà. */
     houseRing: 21,
-    treeCount: 650,
-    /** Tỉ lệ cây thông (còn lại là cây tán tròn). */
-    pineRatio: 0.6,
-    rockCount: 90,
-    bushCount: 220,
+    /** Số cây thật (ez-tree) — điện thoại dùng ít hơn. */
+    treeCount: 340,
+    mobileTreeCount: 110,
+    rockCount: 70,
+    /** Gốc cây + thân cây đổ. */
+    logCount: 30,
+    /** Bụi + dương xỉ (điện thoại dùng một nửa). */
+    bushCount: 180,
     /** Khoảng cách tối thiểu giữa 2 cây. */
-    treeSpacing: 2.6,
+    treeSpacing: 4.5,
+    /** Cạnh ô lưới (m) khi gom cây/đá thành nhóm để bỏ qua nhóm ngoài khung nhìn. */
+    chunkSize: 30,
     pathWidth: 1.8,
   },
   player: {
     radius: 0.5,
-    walkSpeed: 5,
-    runSpeed: 10,
-    jumpVelocity: 9,
+    /** Tốc độ gần với người thật (m/s), hơi nhanh hơn cho dễ chơi. */
+    walkSpeed: 3.2,
+    runSpeed: 7,
+    /** Nhảy cao ~1.3 m — vẫn lên được thùng gỗ. */
+    jumpVelocity: 8,
     gravity: 25,
     groundAccel: 12,
     airAccel: 4,
-    turnSharpness: 14,
+    turnSharpness: 12,
+    /** Độ cao điểm camera nhìn vào theo tư thế (m). */
+    eyeHeight: { stand: 1.6, crouch: 0.95, prone: 0.55 },
+    /** Bấm nhảy khi đang ngồi/nằm: chờ đứng dậy xong (giây) rồi mới bật nhảy. */
+    standUpTime: { stand: 0, crouch: 0.35, prone: 0.6 },
+    /** Tốc độ đi khom và bò (m/s). */
+    crouchSpeed: 1.7,
+    proneSpeed: 0.8,
+    /**
+     * false: nhân vật quay mặt theo hướng di chuyển (kiểu phiêu lưu).
+     * true: luôn quay theo hướng ngắm của camera, đi ngang/lùi được (kiểu bắn súng).
+     */
+    faceAimDirection: false,
   },
   camera: {
     fov: 60,
@@ -61,18 +80,32 @@ export const CONFIG = {
   },
   character: {
     /** File nằm trong public/ — đổi model chỉ cần đổi url + tên clip bên dưới. */
-    url: 'models/RobotExpressive.glb',
+    /** Người thật CC0 (grab3d.com "Man Base Mesh", đã tối ưu bằng gltf-transform). */
+    url: 'models/man.glb',
     /** Chiều cao hiển thị (m); model được tự co giãn cho khớp. */
     height: 1.8,
     /** Tên animation trong file glb ứng với từng trạng thái. */
-    clips: { idle: 'Idle', walk: 'Walking', run: 'Running', jump: 'Jump' },
+    /**
+     * Clip có sẵn trong file. Trạng thái nào thiếu (idle, sit, lie) được dựng tự động
+     * bằng PoseBuilder; thiếu jump thì giữ bước chân, phát chậm khi ở trên không.
+     */
+    clips: { walk: 'walk', run: 'run' } as Partial<
+      Record<'idle' | 'walk' | 'run' | 'jump' | 'crouch' | 'crouchWalk' | 'prone' | 'crawl', string>
+    >,
+    /** Xoay model cho mặt nhìn về +Z. */
+    rotationY: 0,
     /** Thời gian chuyển mượt giữa 2 animation (giây). */
     fade: 0.2,
+    /** Thời gian chuyển khi ngồi xuống/nằm xuống/đứng dậy (giây). */
+    postureFade: 0.6,
+    /** Tốc độ khớp bước của chu kỳ đi khom / bò tự dựng (m/s). */
+    crouchClipSpeed: 1.5,
+    crawlClipSpeed: 0.75,
     /** Trên tốc độ này dùng animation chạy thay vì đi. */
-    runThreshold: 7,
+    runThreshold: 5,
     /** Tốc độ di chuyển khớp với tốc độ gốc của clip đi/chạy (để chân không bị trượt). */
-    walkClipSpeed: 4,
-    runClipSpeed: 9,
+    walkClipSpeed: 2.6,
+    runClipSpeed: 6,
   },
   touch: {
     /** Bán kính joystick ảo (px). */
@@ -94,13 +127,22 @@ export const CONFIG = {
   },
   render: {
     maxPixelRatio: 2,
-    shadowMapSize: 2048,
+    shadowMapSize: 4096,
     /** Giảm tải cho điện thoại: độ phân giải và bóng đổ thấp hơn. */
     mobileMaxPixelRatio: 1.5,
     mobileShadowMapSize: 1024,
     shadowArea: 30,
-    background: 0xa9c9bd,
-    fogNear: 22,
-    fogFar: 95,
+    /** Màu nền trước khi bầu trời HDRI tải xong; cũng là màu sương xa. */
+    background: 0xbfd0dc,
+    fogNear: 30,
+    fogFar: 150,
+    /** Bầu trời ảnh thật (Poly Haven, CC0): làm nền + ánh sáng môi trường. */
+    skyUrl: 'hdri/sky_1k.hdr',
+    environmentIntensity: 0.55,
+    /** Độ phơi sáng sau khi tone mapping ACES. */
+    exposure: 0.82,
+    /** Hậu kỳ (AO, bloom, khử răng cưa) — chỉ bật trên máy tính. */
+    postprocessing: true,
+    bloomStrength: 0.25,
   },
 } as const;

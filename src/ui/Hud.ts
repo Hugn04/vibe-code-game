@@ -25,11 +25,11 @@ export class Hud {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     const hint = isTouch
-      ? 'Bên trái: kéo để đi, đẩy hết cỡ để chạy<br>Bên phải: vuốt để xoay camera<br>Nút tròn góc phải: nhảy'
+      ? 'Bên trái: kéo để đi, đẩy hết cỡ để chạy<br>Bên phải: vuốt để xoay camera<br>Nút tròn góc phải: nhảy · Ngồi / Nằm'
       : 'Di chuột để ngắm · <kbd>Esc</kbd> để tạm dừng';
     this.root.innerHTML = `
       <div class="hud-panel">
-        <div class="hud-help"><kbd>WASD</kbd>/<kbd>←↑↓→</kbd> di chuyển · <kbd>Shift</kbd> chạy · <kbd>Space</kbd> nhảy</div>
+        <div class="hud-help"><kbd>WASD</kbd>/<kbd>←↑↓→</kbd> di chuyển · <kbd>Shift</kbd> chạy · <kbd>Space</kbd> nhảy · <kbd>C</kbd> ngồi xổm · <kbd>Z</kbd> nằm sấp</div>
         <div class="hud-help"><kbd>Chuột</kbd> ngắm · <kbd>Lăn chuột</kbd> zoom · <kbd>Esc</kbd> tạm dừng</div>
         <div class="hud-stats"></div>
       </div>
@@ -72,11 +72,25 @@ export class Hud {
     this.root.querySelector('.rotate-hint')!.addEventListener('click', handler);
   }
 
+  private loading = false;
+
+  /** Màn chờ tải: chưa cho bấm chơi. */
+  setLoading(loading: boolean): void {
+    this.loading = loading;
+    this.pauseOverlay.classList.toggle('loading', loading);
+    if (loading) this.pauseTitle.textContent = 'Đang tải khu rừng…';
+    else this.setPaused(!this.pauseOverlay.hidden, false);
+  }
+
   setPaused(paused: boolean, hasStarted: boolean): void {
     this.pauseOverlay.hidden = !paused;
     this.crosshair.hidden = paused;
     const start = this.isTouch ? 'Chạm để chơi' : 'Bấm để chơi';
-    this.pauseTitle.textContent = hasStarted ? 'Tạm dừng' : start;
+    this.pauseTitle.textContent = this.loading
+      ? 'Đang tải khu rừng…'
+      : hasStarted
+        ? 'Tạm dừng'
+        : start;
     // Đang giữa ván → có nút Tiếp tục / Thoát; màn bắt đầu thì chỉ cần chạm.
     this.pauseActions.hidden = !hasStarted;
   }

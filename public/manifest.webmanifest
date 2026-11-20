@@ -1,0 +1,9 @@
+{
+  "name": "Movement Demo",
+  "short_name": "Movement",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#a9c9bd",
+  "theme_color": "#a9c9bd"
+}

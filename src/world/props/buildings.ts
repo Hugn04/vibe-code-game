@@ -5,7 +5,7 @@ import { pbrMaterial } from '../textures';
  * Gán UV kiểu "chiếu hộp": mỗi mặt lấy UV theo 2 trục vuông góc với pháp tuyến của nó,
  * theo đơn vị mét / `tile`. Texture giữ đúng tỉ lệ thật trên tường, mái, cột… mọi kích cỡ.
  */
-function boxProjectUVs(geometry: THREE.BufferGeometry, tile: number): THREE.BufferGeometry {
+export function boxProjectUVs(geometry: THREE.BufferGeometry, tile: number): THREE.BufferGeometry {
   const g = geometry.index ? geometry.toNonIndexed() : geometry;
   g.computeVertexNormals();
   const pos = g.attributes.position;

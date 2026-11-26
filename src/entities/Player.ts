@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from '@/config';
-import { groundHeightAt, resolveHorizontal, type Box } from '@/physics/collision';
+import { ceilingHeightAt, groundHeightAt, resolveHorizontal, type Box } from '@/physics/collision';
 import { angleDelta, clamp, damp } from '@/utils/math';
 import { CharacterModel, type MoveState } from './CharacterModel';
 
@@ -67,6 +67,37 @@ export class Player {
     this.velocity.set(0, 0, 0);
   }
 
+  private viewCamera: THREE.Camera | null = null;
+  private lookPitch = 0;
+  private lookYaw = 0;
+
+  /**
+   * Góc nhìn thứ nhất với thân thật: camera chính không vẽ phần đầu (khỏi che mắt),
+   * cúi xuống thấy thân/chân, soi gương + bóng đổ vẫn thấy đầy đủ.
+   */
+  setViewCamera(camera: THREE.Camera | null): void {
+    this.viewCamera = camera;
+    this.character?.enableHeadClip(camera !== null);
+    // Viên thuốc thay thế (khi model chưa tải): ẩn khỏi camera chính, vẫn đổ bóng.
+    this.body.layers.set(camera ? 1 : 0);
+    this.body.traverse((o) => o.layers.set(camera ? 1 : 0));
+  }
+
+  /**
+   * Vị trí mắt thật (từ xương đầu của model) — camera góc nhìn thứ nhất đặt ở đây.
+   * @returns false khi chưa có model.
+   */
+  eyePosition(out: THREE.Vector3): boolean {
+    return (
+      this.character?.eyePosition(out, this.lookYaw, this.lookPitch, this.horizontalSpeed) ?? false
+    );
+  }
+
+  /** Ẩn/hiện phần đầu với camera chính (gọi quanh lượt vẽ khung hình chính). */
+  setHeadHidden(hidden: boolean): void {
+    this.character?.setHeadHidden(hidden);
+  }
+
   /** Tải model nhân vật; lỗi thì giữ nguyên viên thuốc. */
   async loadCharacter(url: string): Promise<void> {
     const c = CONFIG.character;
@@ -82,6 +113,7 @@ export class Player {
     this.character = character;
     this.body.visible = false;
     this.object.add(character.root);
+    this.setViewCamera(this.viewCamera);
   }
 
   get animationState(): MoveState | null {
@@ -163,13 +195,22 @@ export class Player {
     const prevY = p.y;
     p.x = clamp(p.x + v.x * dt, -bound, bound);
     p.z = clamp(p.z + v.z * dt, -bound, bound);
-    resolveHorizontal(p, c.radius, obstacles);
+    const body = { height: c.bodyHeight[this.posture], step: this.onGround ? c.stepHeight : 0.1 };
+    resolveHorizontal(p, c.radius, obstacles, body);
 
     // Trọng lực + tiếp đất.
     v.y -= c.gravity * dt;
     p.y += v.y * dt;
-    const floor = groundHeightAt(p, prevY, obstacles);
-    if (p.y <= floor) {
+    // Cụng đầu vào trần / sàn tầng trên khi nhảy.
+    const ceiling = ceilingHeightAt(p, prevY, obstacles);
+    if (p.y + body.height > ceiling) {
+      p.y = Math.max(prevY, ceiling - body.height);
+      if (v.y > 0) v.y = 0;
+    }
+    const floor = groundHeightAt(p, prevY, obstacles, this.onGround ? c.stepHeight : 0);
+    // Đang đi trên mặt đất mà bậc phía trước thấp hơn ít → bám xuống (xuống cầu thang không bị nảy).
+    const snapDown = this.onGround && v.y <= 0 && p.y - floor < c.stepHeight;
+    if (p.y <= floor || snapDown) {
       p.y = floor;
       v.y = 0;
       this.onGround = true;
@@ -182,7 +223,9 @@ export class Player {
    * @param alpha phần dư của bước vật lý (0..1) để nội suy vị trí hiển thị.
    * @param aimYaw nếu có, nhân vật quay mặt theo hướng ngắm; nếu null thì quay theo hướng chạy.
    */
-  render(alpha: number, dt: number, aimYaw: number | null = null): void {
+  render(alpha: number, dt: number, aimYaw: number | null = null, lookPitch = 0): void {
+    this.lookPitch = lookPitch;
+    if (aimYaw !== null) this.lookYaw = aimYaw;
     this.object.position.lerpVectors(this.prevPosition, this.position, alpha);
 
     const speed = this.horizontalSpeed;
@@ -193,6 +236,7 @@ export class Player {
       this.object.rotation.y += angleDelta(this.object.rotation.y, facing) * damp(sharp, dt);
     }
 
+    this.object.updateMatrixWorld(true);
     if (this.character) this.animateCharacter(this.character, speed, dt);
     else this.animateCapsule(speed, dt);
   }
@@ -243,6 +287,7 @@ export class Player {
       character.setTimeScale(direction * clamp(speed / clipSpeed, 0.5, 1.6));
     }
     character.update(dt);
+    character.applyLook(this.lookPitch);
   }
 
   /** Hoạt ảnh đơn giản cho viên thuốc: nhún khi đi, co giãn khi nhảy, nghiêng theo tốc độ. */

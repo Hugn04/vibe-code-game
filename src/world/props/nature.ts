@@ -8,6 +8,8 @@ export interface PropInstance {
   rotY: number;
   /** 0..1 — biến thiên màu nhẹ giữa các bản sao. */
   tint: number;
+  /** Độ cao đặt vật (m), mặc định 0 = trên mặt đất. */
+  y?: number;
 }
 
 export interface Part {
@@ -135,7 +137,7 @@ export function instantiate(
       cellItems.forEach((it, i) => {
         rotation.setFromAxisAngle(up, it.rotY);
         scale.setScalar(it.scale);
-        position.set(it.x, 0, it.z);
+        position.set(it.x, it.y ?? 0, it.z);
         mesh.setMatrixAt(i, matrix.compose(position, rotation, scale));
         if (part.tintBase) {
           const d = it.tint - 0.5;
@@ -150,4 +152,37 @@ export function instantiate(
     }
   }
   return meshes;
+}
+
+/**
+ * Hộp va chạm thẳng trục bao trọn model đã xoay/co giãn.
+ * @param shrink < 1 để thu nhỏ (vật tròn như thùng, đá).
+ * @param top độ cao đỉnh collider; mặc định = đỉnh model.
+ */
+export function kindCollider(
+  kind: PropKind,
+  it: PropInstance,
+  shrink = 1,
+  top?: number,
+): { minX: number; maxX: number; minZ: number; maxZ: number; top: number; bottom?: number } {
+  const b = kind.bounds;
+  const cx = ((b.min.x + b.max.x) / 2) * it.scale;
+  const cz = ((b.min.z + b.max.z) / 2) * it.scale;
+  const hx = ((b.max.x - b.min.x) / 2) * it.scale * shrink;
+  const hz = ((b.max.z - b.min.z) / 2) * it.scale * shrink;
+  const c = Math.cos(it.rotY);
+  const s = Math.sin(it.rotY);
+  const wx = it.x + cx * c + cz * s;
+  const wz = it.z - cx * s + cz * c;
+  const ex = Math.abs(c) * hx + Math.abs(s) * hz;
+  const ez = Math.abs(s) * hx + Math.abs(c) * hz;
+  return {
+    minX: wx - ex,
+    maxX: wx + ex,
+    minZ: wz - ez,
+    maxZ: wz + ez,
+    top: top ?? (it.y ?? 0) + b.max.y * it.scale,
+    // Vật đặt trên cao (tầng 2…) → collider lơ lửng, không chặn tầng dưới.
+    bottom: (it.y ?? 0) > 0.05 ? it.y : undefined,
+  };
 }

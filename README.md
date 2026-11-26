@@ -28,7 +28,8 @@ npm run dev        # mở http://localhost:5173
 | Space             | Nhảy            |
 | C / Ctrl          | Ngồi xổm, đi khom được (bấm lại để đứng) |
 | Z                 | Nằm sấp, bò được (bấm lại để đứng) |
-| Chuột             | Ngắm / xoay camera |
+| Chuột             | Nhìn / ngắm |
+| E (hoặc F)        | Mở / đóng cửa · Lên / xuống xe |
 | Lăn chuột         | Zoom            |
 | Esc / P           | Tạm dừng        |
 
@@ -58,14 +59,24 @@ tests/                         Unit test cho logic thuần
 scripts/fetch-assets.mjs       Tải + tối ưu tài nguyên Poly Haven (npm run assets)
 ```
 
+## Bản đồ
+
+Chọn ở `CONFIG.world.map` (`src/config.ts`):
+
+- **`hospital`** (mặc định) — bệnh viện **2 tầng** có cầu thang, 15 cánh cửa mở/đóng được (E). Tầng 2: phòng bệnh 201–204, hồi sức, phòng bác sĩ, xét nghiệm, sảnh chờ có lan can. Tầng 1: sảnh + quầy lễ tân + ghế chờ, hành lang, 4 phòng bệnh (giường, rèm, cột truyền dịch), phòng mổ, kho thuốc, phòng khám; bên ngoài có mái sảnh, biển tên, bãi đỗ xe, đèn đường, cây xanh. Code: `src/world/HospitalMap.ts`, đồ đạc dựng bằng code ở `src/world/props/hospital.ts`.
+- **`forest`** — làng nhỏ trong rừng. Code: `src/world/ForestMap.ts`.
+
+Tường, sàn, đồ đạc tĩnh được gộp theo vật liệu (`StaticBatch`) để giảm draw call.
+
 ## Tài nguyên (assets)
 
 | File | Nguồn | Giấy phép |
 | --- | --- | --- |
 | `public/models/man.glb` — nhân vật (walk, run) | grab3d.com — *Man Base Mesh (rigged)*, tối ưu bằng gltf-transform | CC0 1.0 |
+| `public/models/car.glb` — ô tô lái được | [Khronos glTF Sample Assets — *Car Concept*](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept), Eric Chadwick / Darmstadt Graphics Group (tối ưu bằng gltf-transform) | **CC-BY 4.0** — bắt buộc ghi công như dòng này. Logo Khronos trên xe là nhãn hiệu của Khronos Group |
 | `public/models/RobotExpressive.glb` (dự phòng) | Tomás Laulhé (Quaternius), kho ví dụ three.js | CC0 1.0 |
-| `public/models/env/*.glb` — đá, gốc cây, thân cây đổ, bụi, dương xỉ, thùng gỗ, thùng rượu, bếp lửa | Poly Haven (`npm run assets`) | CC0 |
-| `public/textures/*` — cỏ, đất, tường gỗ/vữa, mái ngói/đá phiến, đá, gỗ | Poly Haven | CC0 |
+| `public/models/env/*.glb` — đá, gốc cây, bụi, thùng, bếp lửa; ghế, bàn, kệ, chậu cây, đồng hồ, TV, hộp y tế, đèn đường… | Poly Haven (`npm run assets`) | CC0 |
+| `public/textures/*` — cỏ, đất, tường gỗ/vữa, mái ngói/đá phiến, đá, gỗ, gạch lát, trần, vữa trắng, nhựa đường, vỉa hè | Poly Haven | CC0 |
 | `public/hdri/sky_1k.hdr` | Poly Haven — *Kloofendal 48d Partly Cloudy (Pure Sky)* | CC0 |
 | Cây (sinh bằng code) | thư viện [ez-tree](https://github.com/dgreenheck/ez-tree) của Dan Greenheck | MIT |
 
@@ -74,6 +85,22 @@ Tất cả tài nguyên trên dùng được cho game thương mại. Riêng ez-
 **Đứng yên, ngồi xổm, đi khom, nằm sấp, bò** không cần có sẵn trong file model: `PoseBuilder` tự dựng tư thế và chu kỳ bước bằng cách xoay từng khúc xương theo hướng mong muốn (chỉnh dáng ở `POSES` trong `src/entities/PoseBuilder.ts`). Model nào có sẵn clip thì khai báo trong `CONFIG.character.clips` để dùng clip đó.
 
 **Đổi nhân vật:** bỏ file `.glb` vào `public/models/`, sửa `CONFIG.character` trong `src/config.ts`: `url`, tên clip trong `clips` (chỉ cần những clip model có; idle/ngồi/nằm tự dựng), `rotationY` nếu model nhìn ngược. Model tự co giãn về chiều cao `height`.
+
+## Lái ô tô
+
+Đi tới xe đỏ ở bãi đỗ, nhìn vào xe và bấm **E**. Trong xe: **W** ga · **S** phanh (gần đứng yên thì lùi) · **A/D** lái · **Space** phanh tay · **L** đèn pha · **E** xuống xe (phải dừng hẳn). Chuột: quay đầu nhìn quanh trong cabin.
+
+- Vật lý (`src/vehicle/CarPhysics.ts`, có unit test): bicycle model có trượt lốp, giới hạn bám × tải trục (chuyển tải khi tăng tốc/phanh), động cơ có đường cong mô-men xoắn, hộp số tự động 6 cấp + lùi (giới hạn ~29 km/h), phanh, phanh tay (đuôi xe trượt), cản gió, cản lăn, vô-lăng giảm góc khi chạy nhanh. Kết quả: 0–100 km/h ~4.8 s, tối đa ~226 km/h, phanh 100→0 ~39 m.
+- Hình ảnh (`src/vehicle/CarModel.ts`): bánh quay + bẻ lái, má phanh đứng yên, vô-lăng xoay (tỉ số ~14:1), thân xe chúi/ngửa/nghiêng theo gia tốc, đèn pha.
+- Va chạm (`src/vehicle/Car.ts`): thân xe = 3 vòng tròn, nảy nhẹ khi đâm; xe cũng là vật cản với người đi bộ.
+- Âm thanh (`src/audio/EngineSound.ts`): tiếng động cơ + rít lốp tổng hợp bằng Web Audio, theo vòng tua/ga/độ trượt.
+
+## Góc nhìn thứ nhất với thân thật
+
+- Camera đặt ở **mắt của model** (xương đầu): đi, ngồi xổm, nằm sấp… tầm mắt đi theo cơ thể thật.
+- Cúi xuống thấy thân + chân. Phần đầu chỉ bị cắt với camera chính (mặt phẳng cắt ở cổ), nên **gương và bóng đổ vẫn thấy đầy đủ**.
+- Đầu + cổ cúi/ngẩng theo hướng nhìn (soi gương thấy rõ).
+- Gương soi thật (`Reflector`) ở tường đông sảnh tầng 1 và 2.
 
 ## Đồ họa
 

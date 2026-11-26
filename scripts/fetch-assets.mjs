@@ -33,6 +33,36 @@ const MODELS = {
   wooden_crate_01: 1,
   wine_barrel_01: 0.6,
   stone_fire_pit: 1,
+  // Bệnh viện
+  potted_plant_01: 0.15,
+  potted_plant_02: 0.2,
+  plastic_monobloc_chair_01: 1,
+  metal_office_desk: 1,
+  wall_clock: 1,
+  medical_box: 1,
+  steel_frame_shelves_01: 1,
+  cardboard_box_01: 0.4,
+  television_02: 1,
+  metal_stool_01: 1,
+  trashbag: 1,
+  street_lamp_01: 0.5,
+  // Bệnh viện – đợt 2
+  vintage_crutches_01: 1,
+  industrial_storage_cart: 0.6,
+  tool_cart: 0.5,
+  desk_lamp_arm_01: 0.6,
+  classic_laptop: 0.6,
+  clipboard: 1,
+  binder_notebook: 0.5,
+  stationery_supplies: 1,
+  industrial_microscope: 0.5,
+  chemistry_set: 0.3,
+  wooden_bookshelf_worn: 1,
+  fire_alarm: 1,
+  dining_table: 1,
+  plastic_container: 1,
+  potted_plant_04: 1,
+  metal_stool_02: 1,
 };
 
 /** id texture Poly Haven → tên lưu trong public/textures. */
@@ -43,6 +73,13 @@ const TEXTURES = {
   roof_slates_02: 'roof_slates',
   stone_wall: 'stone',
   dark_wooden_planks: 'beam',
+  // Bệnh viện
+  large_grey_tiles: 'floor_tiles',
+  white_plaster_02: 'wall_white',
+  ceiling_interior: 'ceiling',
+  white_stucco: 'facade',
+  asphalt_02: 'asphalt',
+  concrete_pavement: 'pavement',
 };
 
 async function json(url) {

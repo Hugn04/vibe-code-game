@@ -130,7 +130,16 @@ export class PoseBuilder {
         this.rest.set(b, { q: b.quaternion.clone(), p: b.position.clone() });
       }
     });
+    // Hướng gốc của đầu trong không gian nhân vật (đầu thẳng, mặt nhìn về trước).
+    const head = this.rig?.head[1];
+    if (head) {
+      root.updateMatrixWorld(true);
+      const rootInv = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+      this.headRest = rootInv.multiply(head.getWorldQuaternion(new THREE.Quaternion()));
+    }
   }
+
+  private headRest: THREE.Quaternion | null = null;
 
   get supported(): boolean {
     return this.rig !== null;
@@ -195,8 +204,21 @@ export class PoseBuilder {
       const child = rig.spine[i + 1] ?? rig.head[0];
       if (child) this.aim(rig.spine[i], child, dir(spec.spine));
     }
-    for (let i = 0; i < rig.head.length - 1; i++) {
-      this.aim(rig.head[i], rig.head[i + 1], dir(spec.head ?? spec.spine));
+    // Chỉ xoay CỔ (cổ → đầu). Không xoay chính xương đầu theo xương con của nó: nhiều rig có
+    // xương phụ (head_end, headfront…) đặt lệch (sau gáy, trước mặt) → xoay theo đó sẽ vặn đầu.
+    // Đầu giữ nguyên tư thế gốc so với cổ.
+    if (rig.head.length >= 2) {
+      this.aim(rig.head[0], rig.head[1], dir(spec.head ?? spec.spine));
+      // Đầu: giữ đúng hướng gốc (thẳng, nhìn về trước) bất kể thân/cổ cúi hay nằm —
+      // giống người thật luôn giữ đầu ngang tầm mắt. Cúi/ngẩng theo chuột do applyLook() lo.
+      const head = rig.head[1];
+      if (this.headRest) {
+        this.root.updateMatrixWorld(true);
+        const want = this.root.getWorldQuaternion(new THREE.Quaternion()).multiply(this.headRest);
+        const parentInv = head.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+        head.quaternion.copy(parentInv.multiply(want));
+        head.updateMatrixWorld(true);
+      }
     }
     for (const side of ['L', 'R'] as const) {
       this.aim(rig.thigh[side], rig.shin[side], dir(mirror(spec.thigh, side), side));

@@ -358,3 +358,172 @@ canvas {
   right: calc(36px + env(safe-area-inset-right));
   bottom: calc(132px + env(safe-area-inset-bottom));
 }
+
+/* ---------- Tâm ngắm kiểu FPS (nhỏ, gọn) + gợi ý tương tác ---------- */
+
+.hud-crosshair {
+  --size: 18px;
+  --gap: 3px;
+}
+
+.hud-crosshair.on-target {
+  --color: #ffd54f;
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.hud-prompt {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 34px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.hud-prompt[hidden] {
+  display: none;
+}
+
+.hud-prompt kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: #ffd54f;
+  color: #222;
+  font:
+    700 13px system-ui,
+    sans-serif;
+}
+
+/* Nút tương tác (Mở/Đóng) + đổi góc nhìn trên điện thoại */
+.touch-interact {
+  right: calc(200px + env(safe-area-inset-right));
+  bottom: calc(46px + env(safe-area-inset-bottom));
+  width: 64px;
+  height: 64px;
+  font:
+    700 14px system-ui,
+    sans-serif;
+  background: rgba(255, 213, 79, 0.45);
+}
+
+.touch-interact[hidden] {
+  display: none;
+}
+
+/* ---------- Đồng hồ lái xe ---------- */
+
+.hud-vehicle {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: end;
+  gap: 4px 14px;
+  padding: 10px 18px 8px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  pointer-events: none;
+  min-width: 220px;
+}
+
+.hud-vehicle[hidden] {
+  display: none;
+}
+
+.hud-speed {
+  font:
+    800 40px/1 system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-speed small {
+  font-size: 13px;
+  font-weight: 600;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+.hud-gear {
+  font:
+    800 28px/1 system-ui,
+    sans-serif;
+  color: #ffd54f;
+  justify-self: end;
+}
+
+.hud-rpm {
+  grid-column: 1 / -1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.hud-rpm-bar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #4fc3f7, #81c784);
+  transition: width 0.05s linear;
+}
+
+.hud-rpm-bar.red {
+  background: linear-gradient(90deg, #ffb74d, #ef5350);
+}
+
+.hud-drive-help {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.hud-drive-help kbd {
+  font: inherit;
+  font-weight: 700;
+  color: #ffd54f;
+}
+
+.hud-vehicle.lights-on .hud-gear::after {
+  content: ' ◉';
+  font-size: 14px;
+  color: #b3e5fc;
+}
+
+.hud-flash {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.hud-flash[hidden] {
+  display: none;
+}
+
+/* Đang lái: ẩn nút ngồi/nằm, ẩn tâm ngắm */
+.driving .touch-pose,
+.driving .hud-crosshair {
+  display: none !important;
+}

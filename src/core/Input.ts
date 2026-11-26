@@ -8,6 +8,8 @@ export const BINDINGS = {
   jump: ['Space'],
   crouch: ['KeyC', 'ControlLeft'],
   prone: ['KeyZ'],
+  interact: ['KeyE', 'KeyF'],
+  lights: ['KeyL'],
   pause: ['Escape', 'KeyP'],
 } as const;
 

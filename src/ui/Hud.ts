@@ -13,6 +13,8 @@ export class Hud {
   private readonly root: HTMLDivElement;
   private readonly stats: HTMLDivElement;
   private readonly crosshair: HTMLDivElement;
+  private readonly prompt: HTMLDivElement;
+  private promptText = '';
   private readonly pauseOverlay: HTMLDivElement;
   private readonly pauseTitle: HTMLHeadingElement;
   private readonly pauseActions: HTMLDivElement;
@@ -30,10 +32,18 @@ export class Hud {
     this.root.innerHTML = `
       <div class="hud-panel">
         <div class="hud-help"><kbd>WASD</kbd>/<kbd>←↑↓→</kbd> di chuyển · <kbd>Shift</kbd> chạy · <kbd>Space</kbd> nhảy · <kbd>C</kbd> ngồi xổm · <kbd>Z</kbd> nằm sấp</div>
-        <div class="hud-help"><kbd>Chuột</kbd> ngắm · <kbd>Lăn chuột</kbd> zoom · <kbd>Esc</kbd> tạm dừng</div>
+        <div class="hud-help"><kbd>Chuột</kbd> nhìn · <kbd>E</kbd> mở/đóng cửa · <kbd>Esc</kbd> tạm dừng</div>
         <div class="hud-stats"></div>
       </div>
       <div class="hud-crosshair" hidden></div>
+      <div class="hud-vehicle" hidden>
+        <div class="hud-speed"><span class="hud-kmh">0</span><small>km/h</small></div>
+        <div class="hud-gear">N</div>
+        <div class="hud-rpm"><div class="hud-rpm-bar"></div></div>
+        <div class="hud-drive-help"></div>
+      </div>
+      <div class="hud-flash" hidden></div>
+      <div class="hud-prompt" hidden><kbd class="hud-prompt-key">E</kbd><span></span></div>
       <div class="rotate-hint">
         <div class="rotate-phone"></div>
         <p>Xoay ngang điện thoại để chơi</p>
@@ -52,6 +62,8 @@ export class Hud {
 
     this.stats = this.root.querySelector('.hud-stats')!;
     this.crosshair = this.root.querySelector('.hud-crosshair')!;
+    this.prompt = this.root.querySelector('.hud-prompt')!;
+    if (isTouch) this.prompt.querySelector('.hud-prompt-key')!.remove();
     this.pauseOverlay = this.root.querySelector('.hud-pause')!;
     this.pauseTitle = this.root.querySelector('.hud-pause h1')!;
     this.pauseActions = this.root.querySelector('.hud-pause-actions')!;
@@ -96,6 +108,54 @@ export class Hud {
   }
 
   /** Tâm ngắm đổi màu khi đang chỉ vào bề mặt. */
+  private vehicleEl: HTMLDivElement | null = null;
+  private flashTimer = 0;
+
+  /** Đồng hồ khi lái xe: tốc độ, số, vòng tua (null = ẩn). */
+  setVehicle(
+    v: { kmh: number; gear: number; rpm: number; redline: number; lights: boolean } | null,
+  ): void {
+    const el = (this.vehicleEl ??= this.root.querySelector('.hud-vehicle')!);
+    if (!v) {
+      if (!el.hidden) el.hidden = true;
+      return;
+    }
+    if (el.hidden) {
+      el.hidden = false;
+      el.querySelector('.hud-drive-help')!.innerHTML = this.isTouch
+        ? 'Joystick: ga · phanh/lùi · lái &nbsp;·&nbsp; ⤒ phanh tay'
+        : '<kbd>W</kbd> ga · <kbd>S</kbd> phanh/lùi · <kbd>A</kbd><kbd>D</kbd> lái · <kbd>Space</kbd> phanh tay · <kbd>L</kbd> đèn · <kbd>E</kbd> xuống xe';
+    }
+    el.querySelector('.hud-kmh')!.textContent = String(Math.round(v.kmh));
+    el.querySelector('.hud-gear')!.textContent =
+      v.gear < 0 ? 'R' : v.gear === 0 ? 'N' : String(v.gear);
+    const bar = el.querySelector<HTMLDivElement>('.hud-rpm-bar')!;
+    const frac = Math.min(1, v.rpm / v.redline);
+    bar.style.width = `${(frac * 100).toFixed(1)}%`;
+    bar.classList.toggle('red', frac > 0.86);
+    el.classList.toggle('lights-on', v.lights);
+  }
+
+  /** Thông báo ngắn giữa màn hình (vd. "Dừng xe để xuống"). */
+  flash(text: string): void {
+    const el = this.root.querySelector<HTMLDivElement>('.hud-flash')!;
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => (el.hidden = true), 1500);
+  }
+
+  /** Gợi ý tương tác dưới tâm ngắm (vd. "E  Mở cửa"); null = ẩn. */
+  setPrompt(text: string | null): void {
+    const show = text !== null;
+    if (this.prompt.hidden === !show && this.promptText === text) return;
+    this.prompt.hidden = !show;
+    if (text !== null && text !== this.promptText) {
+      this.prompt.querySelector('span')!.textContent = text;
+      this.promptText = text;
+    }
+  }
+
   setTargeting(onTarget: boolean): void {
     this.crosshair.classList.toggle('on-target', onTarget);
   }

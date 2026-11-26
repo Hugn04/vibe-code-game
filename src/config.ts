@@ -6,10 +6,18 @@ export const CONFIG = {
   world: {
     /** Nửa kích thước bản đồ: người chơi bị giới hạn trong [-size, size]. */
     size: 95,
+    /** Bản đồ: 'hospital' (bệnh viện) hoặc 'forest' (làng trong rừng). */
+    map: 'hospital' as 'hospital' | 'forest',
     /** Seed cố định để bản đồ giống nhau mỗi lần chơi. */
     seed: 1337,
     /** Điểm xuất phát của người chơi. */
     spawn: { x: 0, z: 7 },
+  },
+  hospital: {
+    /** Độ sáng mỗi đèn trần (candela). Điện thoại chỉ bật đèn hành lang + sảnh. */
+    lightIntensity: 60,
+    treeCount: 80,
+    mobileTreeCount: 40,
   },
   forest: {
     /** Bán kính bãi đất trống giữa làng. */
@@ -43,7 +51,11 @@ export const CONFIG = {
     airAccel: 4,
     turnSharpness: 12,
     /** Độ cao điểm camera nhìn vào theo tư thế (m). */
-    eyeHeight: { stand: 1.6, crouch: 0.95, prone: 0.55 },
+    eyeHeight: { stand: 1.62, crouch: 1.0, prone: 0.45 },
+    /** Chiều cao thân theo tư thế (m) — để chui dưới vật, không xuyên trần. */
+    bodyHeight: { stand: 1.8, crouch: 1.2, prone: 0.6 },
+    /** Bậc cao tối đa bước lên không cần nhảy (cầu thang ~0.18 m/bậc). */
+    stepHeight: 0.4,
     /** Bấm nhảy khi đang ngồi/nằm: chờ đứng dậy xong (giây) rồi mới bật nhảy. */
     standUpTime: { stand: 0, crouch: 0.35, prone: 0.6 },
     /** Tốc độ đi khom và bò (m/s). */
@@ -56,6 +68,15 @@ export const CONFIG = {
     faceAimDirection: false,
   },
   camera: {
+    /** Góc nhìn thứ nhất cố định (code góc nhìn thứ 3 vẫn giữ để dùng khi cần, vd. cắt cảnh). */
+    mode: 'first' as 'first' | 'third',
+    firstPersonFov: 75,
+    /** Góc ngẩng/cúi tối đa khi nhìn thứ nhất (rad, ~83°). */
+    firstPersonMaxPitch: 1.45,
+    /** Biên độ nhún đầu khi bước (m). */
+    headBob: 0.035,
+    /** Làm mượt vị trí mắt theo animation (càng lớn càng bám sát). */
+    eyeSmoothing: 25,
     fov: 60,
     portraitFov: 78,
     distance: 7,
@@ -114,6 +135,16 @@ export const CONFIG = {
     runThreshold: 0.9,
     /** Hệ số vuốt màn hình → xoay camera (so với 1 pixel chuột). */
     lookSensitivity: 1.8,
+  },
+  vehicle: {
+    /** Xe "Car Concept" — Khronos glTF Sample Assets, CC-BY 4.0 (Eric Chadwick / Darmstadt Graphics Group). */
+    url: 'models/car.glb',
+    /** Chỗ đỗ ban đầu (bãi xe trước bệnh viện), đầu xe hướng theo `heading` (rad). */
+    spawn: { x: -8, z: 25, heading: Math.PI / 2 },
+  },
+  interact: {
+    /** Tầm với để mở cửa… (m). */
+    reach: 2.6,
   },
   aim: {
     maxDistance: 120,

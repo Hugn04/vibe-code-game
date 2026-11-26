@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '@/config';
 import type { Box } from '@/physics/collision';
+import type { Interactable } from './Door';
 import { IS_TOUCH_DEVICE } from '@/utils/device';
 import { distanceToSegment } from '@/utils/math';
 import {
@@ -11,13 +12,21 @@ import {
   type HouseOptions,
 } from './props/buildings';
 import { createTreeKinds, loadGlbKind } from './props/library';
-import { instantiate, type PropInstance, type PropKind } from './props/nature';
+import { instantiate, kindCollider, type PropInstance, type PropKind } from './props/nature';
 import { pbrMaterial, setWorldUVs } from './textures';
 
 export interface MapBuild {
   root: THREE.Group;
   colliders: Box[];
   aimTargets: THREE.Object3D[];
+  /** Chỗ xuất phát + hướng mặt (rad) của người chơi; mặc định CONFIG.world.spawn. */
+  spawn?: { x: number; z: number; rotY: number };
+  /** Vật tương tác được (cửa…). */
+  interactables?: Interactable[];
+  /** Gương phản chiếu (Reflector) — Game tự vẽ phản chiếu trước khung hình chính. */
+  mirrors?: THREE.Mesh[];
+  /** Cập nhật mỗi frame (hoạt ảnh cửa…). */
+  update?: (dt: number) => void;
 }
 
 /** Model môi trường đã tải (xem `npm run assets` và src/world/props/library.ts). */
@@ -101,20 +110,10 @@ export function buildForestMap(rand: () => number, assets: MapAssets): MapBuild 
     return r;
   };
 
-  /** Collider hộp thẳng trục bao trọn model đã xoay/co giãn (shrink < 1 cho vật hình tròn). */
   const addKindCollider = (kind: PropKind, it: PropInstance, shrink = 1, top?: number) => {
-    const b = kind.bounds;
-    const cx = ((b.min.x + b.max.x) / 2) * it.scale;
-    const cz = ((b.min.z + b.max.z) / 2) * it.scale;
-    const hx = ((b.max.x - b.min.x) / 2) * it.scale * shrink;
-    const hz = ((b.max.z - b.min.z) / 2) * it.scale * shrink;
-    const c = Math.cos(it.rotY);
-    const s = Math.sin(it.rotY);
-    const wx = it.x + cx * c + cz * s;
-    const wz = it.z - cx * s + cz * c;
-    const ex = Math.abs(c) * hx + Math.abs(s) * hz;
-    const ez = Math.abs(s) * hx + Math.abs(c) * hz;
-    return addCollider(wx, wz, ex, ez, top ?? b.max.y * it.scale);
+    const c = kindCollider(kind, it, shrink, top);
+    colliders.push(c);
+    return c;
   };
 
   // ---- Bãi đất giữa làng: giếng + bếp lửa ----

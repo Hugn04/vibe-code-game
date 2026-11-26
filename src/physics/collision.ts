@@ -1,12 +1,17 @@
 import { clamp } from '@/utils/math';
 
-/** Khối hộp đứng trên mặt đất, mô tả bằng hình chiếu XZ và chiều cao đỉnh. */
+/**
+ * Khối hộp va chạm thẳng trục: hình chiếu XZ + khoảng cao [bottom, top].
+ * - `bottom` bỏ trống = chạm đất (0). Có `bottom` → vật lơ lửng (sàn tầng trên, tường tầng 2…).
+ * - `top` đổi được lúc chạy (vd. cửa mở → vô hiệu hóa collider).
+ */
 export interface Box {
   readonly minX: number;
   readonly maxX: number;
   readonly minZ: number;
   readonly maxZ: number;
-  readonly top: number;
+  top: number;
+  bottom?: number;
 }
 
 export interface Vec3Like {
@@ -15,16 +20,36 @@ export interface Vec3Like {
   z: number;
 }
 
+/** Thông số thân người chơi khi va chạm. */
+export interface BodyShape {
+  radius: number;
+  /** Chiều cao thân (m) — để đi lọt dưới sàn tầng trên. */
+  height: number;
+  /** Bậc cao tối đa bước lên được mà không cần nhảy (cầu thang, lề). */
+  step: number;
+}
+
 const EPSILON = 0.01;
+const DEFAULT_BODY: BodyShape = { radius: 0.5, height: 1.8, step: 0 };
+
+/** Hộp có nằm trong khoảng cao của thân người (từ chân y tới đầu y + height) không. */
+const overlapsVertically = (b: Box, y: number, body: BodyShape) =>
+  y + body.step < b.top - EPSILON && y + body.height > (b.bottom ?? 0) + EPSILON;
 
 /**
- * Đẩy hình trụ (tâm p, bán kính r) ra khỏi các hộp mà nó đang chồng lấn theo phương ngang.
- * Hộp có đỉnh thấp hơn chân người chơi bị bỏ qua (người chơi đang đứng/bay phía trên).
+ * Đẩy hình trụ (tâm p) ra khỏi các hộp mà nó đang chồng lấn theo phương ngang.
+ * Bỏ qua hộp thấp hơn chân + bậc (bước lên được) và hộp cao hơn đầu (đi lọt bên dưới).
  */
-export function resolveHorizontal(p: Vec3Like, radius: number, boxes: readonly Box[]): void {
+export function resolveHorizontal(
+  p: Vec3Like,
+  radius: number,
+  boxes: readonly Box[],
+  body: Partial<BodyShape> = {},
+): void {
+  const shape = { ...DEFAULT_BODY, ...body, radius };
   const r2 = radius * radius;
   for (const b of boxes) {
-    if (p.y >= b.top - EPSILON) continue;
+    if (!overlapsVertically(b, p.y, shape)) continue;
 
     const cx = clamp(p.x, b.minX, b.maxX);
     const cz = clamp(p.z, b.minZ, b.maxZ);
@@ -54,10 +79,15 @@ export function resolveHorizontal(p: Vec3Like, radius: number, boxes: readonly B
 
 /**
  * Độ cao mặt đứng dưới chân tại vị trí p.
- * Chỉ tính đỉnh hộp nếu ở bước trước người chơi đã ở trên đỉnh đó (prevY),
- * tránh bị "dịch chuyển" lên nóc khi va vào thành hộp.
+ * Chỉ tính đỉnh hộp nếu ở bước trước chân người chơi đã ở trên (hoặc thấp hơn không quá
+ * `step`) — bước lên bậc thang được, còn va vào thành hộp cao thì không bị "dịch chuyển" lên nóc.
  */
-export function groundHeightAt(p: Vec3Like, prevY: number, boxes: readonly Box[]): number {
+export function groundHeightAt(
+  p: Vec3Like,
+  prevY: number,
+  boxes: readonly Box[],
+  step = 0,
+): number {
   let h = 0;
   for (const b of boxes) {
     if (
@@ -65,11 +95,26 @@ export function groundHeightAt(p: Vec3Like, prevY: number, boxes: readonly Box[]
       p.x < b.maxX &&
       p.z > b.minZ &&
       p.z < b.maxZ &&
-      prevY >= b.top - EPSILON &&
+      prevY + step >= b.top - EPSILON &&
       b.top > h
     ) {
       h = b.top;
     }
   }
   return h;
+}
+
+/**
+ * Trần thấp nhất phía trên đầu (đáy của hộp lơ lửng ngay trên vị trí p), hoặc Infinity.
+ * Dùng để chặn nhảy xuyên sàn tầng trên.
+ */
+export function ceilingHeightAt(p: Vec3Like, feetY: number, boxes: readonly Box[]): number {
+  let c = Infinity;
+  for (const b of boxes) {
+    if (b.bottom === undefined || b.bottom <= feetY + EPSILON) continue;
+    if (p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ && b.bottom < c) {
+      c = b.bottom;
+    }
+  }
+  return c;
 }

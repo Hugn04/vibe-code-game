@@ -4,10 +4,12 @@ import { CONFIG } from '@/config';
 import type { Box } from '@/physics/collision';
 import { IS_TOUCH_DEVICE } from '@/utils/device';
 import { createRng } from '@/utils/math';
-import { buildForestMap, loadMapAssets } from './ForestMap';
+import { buildForestMap, loadMapAssets, type MapBuild } from './ForestMap';
+import type { Interactable } from './Door';
+import { buildHospitalMap, loadHospitalAssets } from './HospitalMap';
 import { pbrMaterial, setWorldUVs } from './textures';
 
-/** Scene tĩnh: bầu trời, ánh sáng, mặt đất và bản đồ làng trong rừng. */
+/** Scene tĩnh: bầu trời, ánh sáng, mặt đất và bản đồ (chọn ở CONFIG.world.map). */
 export class World {
   readonly scene = new THREE.Scene();
   readonly obstacles: Box[] = [];
@@ -15,10 +17,21 @@ export class World {
   readonly aimTargets: THREE.Object3D[] = [];
   /** Vật cản camera (mọi thứ trừ mặt đất). */
   readonly cameraBlockers: THREE.Object3D[] = [];
+  /** Vật tương tác được (cửa…), có sau khi `ready`. */
+  readonly interactables: Interactable[] = [];
+  /** Gương phản chiếu, có sau khi `ready`. */
+  readonly mirrors: THREE.Mesh[] = [];
+  private mapUpdate: ((dt: number) => void) | null = null;
   private readonly sun = new THREE.DirectionalLight(0xfff0dc, 2.6);
   private sky: THREE.Texture | null = null;
   /** Xong khi mọi model của bản đồ đã tải và được đặt vào scene. */
   readonly ready: Promise<void>;
+  /** Chỗ xuất phát của người chơi (bản đồ quyết định, có sau khi `ready`). */
+  spawn: { x: number; z: number; rotY: number } = {
+    x: CONFIG.world.spawn.x,
+    z: CONFIG.world.spawn.z,
+    rotY: 0,
+  };
 
   constructor(seed: number = CONFIG.world.seed) {
     const { render } = CONFIG;
@@ -29,8 +42,11 @@ export class World {
     this.loadSky();
     this.createGround(createRng(seed ^ 0x9e3779b9));
 
-    this.ready = loadMapAssets().then((assets) => {
-      const map = buildForestMap(createRng(seed), assets);
+    this.ready = World.loadMap(seed).then((map) => {
+      if (map.spawn) this.spawn = map.spawn;
+      this.interactables.push(...(map.interactables ?? []));
+      this.mirrors.push(...(map.mirrors ?? []));
+      this.mapUpdate = map.update ?? null;
       this.scene.add(map.root);
       this.obstacles.push(...map.colliders);
       this.aimTargets.push(...map.aimTargets);
@@ -42,6 +58,17 @@ export class World {
         }),
       );
     });
+  }
+
+  private static async loadMap(seed: number): Promise<MapBuild> {
+    const rand = createRng(seed);
+    if (CONFIG.world.map === 'hospital') return buildHospitalMap(rand, await loadHospitalAssets());
+    return buildForestMap(rand, await loadMapAssets());
+  }
+
+  /** Cập nhật mỗi frame: hoạt ảnh cửa… */
+  update(dt: number): void {
+    this.mapUpdate?.(dt);
   }
 
   /** Cho vùng đổ bóng của mặt trời đi theo người chơi. */
@@ -75,6 +102,8 @@ export class World {
     this.scene.add(new THREE.HemisphereLight(0xd4ecff, 0x4a5a33, 0.35));
 
     this.sun.castShadow = true;
+    // Thân nhân vật ở góc nhìn thứ nhất nằm ở layer 1: ẩn với camera nhưng vẫn đổ bóng.
+    this.sun.shadow.camera.layers.enable(1);
     this.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
     this.sun.shadow.bias = -0.0005;
     this.sun.shadow.normalBias = 0.03;

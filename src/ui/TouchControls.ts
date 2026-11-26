@@ -35,7 +35,8 @@ export class TouchControls {
       </button>
       <button class="touch-btn touch-pause" aria-label="Tạm dừng"><span></span><span></span></button>
       <button class="touch-btn touch-pose touch-sit" aria-label="Ngồi">Ngồi</button>
-      <button class="touch-btn touch-pose touch-lie" aria-label="Nằm">Nằm</button>`;
+      <button class="touch-btn touch-pose touch-lie" aria-label="Nằm">Nằm</button>
+      <button class="touch-btn touch-interact" aria-label="Tương tác" hidden>Mở</button>`;
     container.appendChild(this.root);
 
     this.joyBase = this.root.querySelector('.joy-base')!;
@@ -81,6 +82,19 @@ export class TouchControls {
       btn.addEventListener('pointerleave', set(false), opts);
     }
 
+    this.interactBtn = this.root.querySelector<HTMLButtonElement>('.touch-interact')!;
+    const setInteract = (down: boolean) => (e: PointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.input.markTouch();
+      this.interactBtn.classList.toggle('pressed', down);
+      this.input.setVirtualAction('interact', down);
+    };
+    this.interactBtn.addEventListener('pointerdown', setInteract(true), opts);
+    this.interactBtn.addEventListener('pointerup', setInteract(false), opts);
+    this.interactBtn.addEventListener('pointercancel', setInteract(false), opts);
+    this.interactBtn.addEventListener('pointerleave', setInteract(false), opts);
+
     pause.addEventListener(
       'pointerdown',
       (e) => {
@@ -90,6 +104,26 @@ export class TouchControls {
       },
       opts,
     );
+  }
+
+  private readonly interactBtn: HTMLButtonElement;
+  private interactLabel = '';
+
+  /** Hiện nút tương tác khi đang nhìn vào cửa…; null = ẩn. */
+  setInteract(label: string | null): void {
+    const show = label !== null;
+    if (this.interactBtn.hidden === !show && this.interactLabel === label) return;
+    this.interactBtn.hidden = !show;
+    if (label !== null && label !== this.interactLabel) {
+      this.interactBtn.textContent = label.startsWith('Đóng')
+        ? 'Đóng'
+        : label === 'Lên xe'
+          ? 'Lên xe'
+          : label === 'Xuống xe'
+            ? 'Xuống'
+            : 'Mở';
+      this.interactLabel = label;
+    }
   }
 
   setVisible(visible: boolean): void {
